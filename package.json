@@ -17,6 +17,9 @@
   "bin": {
     "symbiote-engine": "cli.js"
   },
+  "scripts": {
+    "test": "node --test tests/*.test.js"
+  },
   "files": [
     "*.js",
     "packs/",
@@ -42,12 +45,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/RND-PRO/symbiote-node.git",
-    "directory": "packages/symbiote-engine"
+    "url": "git+https://github.com/RND-PRO/symbiote-engine.git"
   },
-  "homepage": "https://github.com/RND-PRO/symbiote-node/tree/main/packages/symbiote-engine",
+  "homepage": "https://github.com/RND-PRO/symbiote-engine#readme",
   "bugs": {
-    "url": "https://github.com/RND-PRO/symbiote-node/issues"
+    "url": "https://github.com/RND-PRO/symbiote-engine/issues"
   },
   "author": "RND-PRO <nicothin@gmail.com>",
   "license": "MIT",
