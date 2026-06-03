@@ -1,0 +1,50 @@
+{
+  "name": "symbiote-engine",
+  "version": "0.3.0-alpha.4",
+  "description": "Universal node-based execution engine. Domain-agnostic graph runtime.",
+  "private": false,
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./cli": "./cli.js",
+    "./GraphServer.js": "./GraphServer.js",
+    "./packs/*": "./packs/*",
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "symbiote-engine": "cli.js"
+  },
+  "files": [
+    "*.js",
+    "packs/",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "graph",
+    "nodes",
+    "workflow",
+    "dag",
+    "automation",
+    "execution-engine"  ],
+  "peerDependencies": {
+    "ws": ">=8.0.0"
+  },
+  "peerDependenciesMeta": {
+    "ws": {
+      "optional": true
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RND-PRO/symbiote-node.git",
+    "directory": "packages/symbiote-engine"
+  },
+  "author": "RND-PRO <nicothin@gmail.com>",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
