@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0-alpha.6
+
+- Updated package metadata to point at the standalone `symbiote-engine` repository.
+- Published this release as a metadata-only registry correction after the repository split.
+
 ## 0.3.0-alpha.5
 
 - Published explicit package subpath exports for UI-safe engine helpers used by `symbiote-ui`.
