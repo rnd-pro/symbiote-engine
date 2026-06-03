@@ -8,6 +8,8 @@
   "exports": {
     ".": "./index.js",
     "./cli": "./cli.js",
+    "./FocusController.js": "./FocusController.js",
+    "./Graph.js": "./Graph.js",
     "./GraphServer.js": "./GraphServer.js",
     "./packs/*": "./packs/*",
     "./package.json": "./package.json"
