@@ -1,6 +1,6 @@
 {
   "name": "symbiote-engine",
-  "version": "0.3.0-alpha.4",
+  "version": "0.3.0-alpha.5",
   "description": "Universal node-based execution engine. Domain-agnostic graph runtime.",
   "private": false,
   "type": "module",
@@ -30,7 +30,8 @@
     "workflow",
     "dag",
     "automation",
-    "execution-engine"  ],
+    "execution-engine"
+  ],
   "peerDependencies": {
     "ws": ">=8.0.0"
   },
