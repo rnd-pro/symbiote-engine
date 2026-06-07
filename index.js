@@ -49,3 +49,12 @@ export * as AgentUI from './AgentUICommands.js';
 
 export { FocusController } from './FocusController.js';
 
+export {
+  buildResourceTreeFromEntries,
+  createMemoryPersistenceAdapter,
+  createPersistenceAdapter,
+  createSourceDocument,
+  normalizeResourceTree,
+  normalizeResourceTreeItem,
+  normalizeSourceDocument,
+} from './contracts/index.js';

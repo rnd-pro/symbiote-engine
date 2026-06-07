@@ -8,6 +8,8 @@
   "exports": {
     ".": "./index.js",
     "./cli": "./cli.js",
+    "./contracts": "./contracts/index.js",
+    "./contracts/*": "./contracts/*",
     "./FocusController.js": "./FocusController.js",
     "./Graph.js": "./Graph.js",
     "./GraphServer.js": "./GraphServer.js",
@@ -22,6 +24,7 @@
   },
   "files": [
     "*.js",
+    "contracts/",
     "packs/",
     "README.md",
     "CHANGELOG.md",
