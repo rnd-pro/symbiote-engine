@@ -58,6 +58,19 @@ test('source document and persistence contracts normalize host data', async () =
       language: 'js',
       readable: true,
       diagnostics: [{ message: 'ok', severity: 'info' }],
+      saveAction: {
+        id: 'save-source',
+        label: 'Save',
+        intent: 'source:save',
+        payload: { path: 'src/index.js' },
+      },
+      syntaxTheme: {
+        id: 'agent-dark',
+        tokens: {
+          keyword: 'var(--sn-syntax-keyword)',
+          string: 'var(--sn-syntax-string)',
+        },
+      },
     }
   );
   assert.equal(document.path, 'src/index.js');
@@ -65,6 +78,23 @@ test('source document and persistence contracts normalize host data', async () =
   assert.equal(document.content, 'export const ok = true;');
   assert.equal(document.readable, true);
   assert.equal(document.diagnostics[0].message, 'ok');
+  assert.deepEqual(document.saveAction, {
+    id: 'save-source',
+    label: 'Save',
+    intent: 'source:save',
+    payload: { path: 'src/index.js' },
+  });
+  assert.deepEqual(document.syntaxTokens, {
+    keyword: 'var(--sn-syntax-keyword)',
+    string: 'var(--sn-syntax-string)',
+  });
+  assert.deepEqual(document.syntaxTheme, {
+    id: 'agent-dark',
+    tokens: {
+      keyword: 'var(--sn-syntax-keyword)',
+      string: 'var(--sn-syntax-string)',
+    },
+  });
 
   let contentOnly = createSourceDocument(
     { code: 'const local = true;' },
@@ -72,6 +102,22 @@ test('source document and persistence contracts normalize host data', async () =
   );
   assert.equal(contentOnly.content, 'const local = true;');
   assert.equal(contentOnly.raw, 'const local = true;');
+
+  let saveString = normalizeSourceDocument({
+    path: 'README.md',
+    content: '# Readme',
+    saveAction: 'save-doc',
+    syntaxTokens: {
+      comment: 'var(--sn-syntax-comment)',
+      empty: '',
+    },
+  });
+  assert.deepEqual(saveString.saveAction, { id: 'save-doc', label: 'save-doc' });
+  assert.deepEqual(saveString.syntaxTheme, {
+    tokens: {
+      comment: 'var(--sn-syntax-comment)',
+    },
+  });
 
   assert.throws(() => normalizeSourceDocument({ content: 'missing path' }), /path is required/);
 
