@@ -4,7 +4,7 @@
  * Pure data builders for WebSocket messages that control the UI.
  * No WebSocket dependency — produces message objects for P23 bridge to send.
  *
- * @module symbiote-node/AgentUICommands
+ * @module symbiote-engine/AgentUICommands
  */
 
 /**

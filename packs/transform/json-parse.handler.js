@@ -3,7 +3,7 @@
  *
  * Safely parses JSON input. Returns error instead of throwing.
  *
- * @module symbiote-node/packs/transform/json-parse
+ * @module symbiote-engine/packs/transform/json-parse
  */
 
 export default {

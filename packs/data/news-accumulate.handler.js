@@ -7,7 +7,7 @@
  *
  * Ported from Mr-Computer/automations/argentine-spanish-bot/src/services/news-accumulator.js
  *
- * @module symbiote-node/packs/data/news-accumulate
+ * @module symbiote-engine/packs/data/news-accumulate
  */
 
 import { readFile, writeFile, mkdir } from 'node:fs/promises';

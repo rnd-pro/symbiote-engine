@@ -4,7 +4,7 @@
  * Stores nodes and connections. Provides CRUD operations
  * for AI agents and programmatic graph construction.
  *
- * @module symbiote-node/Graph */
+ * @module symbiote-engine/Graph */
 
 import { nanoid } from './nanoid.js';
 import { getNodeType, registerCustomDrivers } from './Registry.js';

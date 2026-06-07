@@ -1,11 +1,11 @@
 /**
- * GraphServer.js - WebSocket + HTTP server for symbiote-node *
+ * GraphServer.js - WebSocket + HTTP server for symbiote-engine *
  * Provides real-time graph synchronization between server and UI clients.
  * Supports file-based workflow watching, handler hot-reload, and server-side execution.
  *
  * Protocol messages follow SPEC.md P23 Agent Bridge specification.
  *
- * @module symbiote-node/GraphServer */
+ * @module symbiote-engine/GraphServer */
 
 import { createServer as createHttpServer } from 'node:http';
 import { readFile, writeFile, watch as fsWatch } from 'node:fs/promises';
@@ -354,7 +354,7 @@ export async function createServer(options = {}) {
 
 
   await new Promise((resolve) => httpServer.listen(port, resolve));
-  log(`🚀 symbiote-node server on http://localhost:${port}`);
+  log(`🚀 symbiote-engine server on http://localhost:${port}`);
   async function close() {
     for (const stop of watchers) {
       if (typeof stop === 'function') stop();

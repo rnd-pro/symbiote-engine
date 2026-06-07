@@ -4,7 +4,7 @@
  * Waits for all non-null inputs and merges them into a single object.
  * Acts as a synchronization point for parallel branches.
  *
- * @module symbiote-node/packs/flow/wait-all
+ * @module symbiote-engine/packs/flow/wait-all
  */
 
 export default {

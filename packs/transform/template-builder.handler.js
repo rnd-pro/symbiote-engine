@@ -7,7 +7,7 @@
  * Parses {placeholder} syntax in template string, resolves values from
  * upstream data, and produces interpolated text output.
  *
- * @module symbiote-node/packs/transform/template-builder */
+ * @module symbiote-engine/packs/transform/template-builder */
 
 /**
  * Extract placeholder names from template string.

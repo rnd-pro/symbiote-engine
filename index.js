@@ -1,9 +1,9 @@
 /**
- * symbiote-node - Universal node-based execution engine *
+ * symbiote-engine - Universal node-based execution engine *
  * AI-first, domain-agnostic graph runtime.
  * Zero dependencies, pure ESM.
  *
- * @module symbiote-node */
+ * @module symbiote-engine */
 
 
 export { Graph } from './Graph.js';

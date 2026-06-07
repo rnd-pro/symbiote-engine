@@ -7,7 +7,7 @@
  *
  * Ported from Mr-Computer/modules/ai-music-video/src/services/anchor-matcher.js
  *
- * @module symbiote-node/packs/transform/anchor-match
+ * @module symbiote-engine/packs/transform/anchor-match
  */
 
 export default {

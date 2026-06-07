@@ -4,7 +4,7 @@
  * Iterates over an array, executing a body function for each item.
  * The bodyType param specifies which registered node type to execute per item.
  *
- * @module symbiote-node/packs/flow/loop
+ * @module symbiote-engine/packs/flow/loop
  */
 
 import { getNodeType } from '../../Registry.js';

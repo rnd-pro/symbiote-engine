@@ -4,7 +4,7 @@
  * Logs input value to console and passes it through unchanged.
  * Useful for debugging pipelines.
  *
- * @module symbiote-node/packs/util/log */
+ * @module symbiote-engine/packs/util/log */
 
 export default {
   type: 'util/log',
@@ -30,7 +30,7 @@ export default {
     cacheKey: null,
 
     execute: async (inputs, params) => {
-      let label = params.label ? `[${params.label}]` : '[symbiote-node]';
+      let label = params.label ? `[${params.label}]` : '[symbiote-engine]';
       const method = params.level || 'info';
 
       let logFn = console[method] || console.log;

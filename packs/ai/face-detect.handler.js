@@ -11,7 +11,7 @@
  * - mouth:      Mouth position detection (for speech bubble placement)
  * - frames-gpu: Face tracking on WebP frame sequences
  *
- * @module symbiote-node/packs/ai/face-detect
+ * @module symbiote-engine/packs/ai/face-detect
  */
 
 import path from 'path';

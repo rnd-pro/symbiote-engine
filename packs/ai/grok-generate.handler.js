@@ -15,7 +15,7 @@
  *
  * Ported from Mr-Computer/modules/ai-music-video/src/services/grok-*.js
  *
- * @module symbiote-node/packs/ai/grok-generate
+ * @module symbiote-engine/packs/ai/grok-generate
  */
 
 import { readFile, writeFile, mkdir } from 'fs/promises';

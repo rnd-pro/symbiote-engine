@@ -7,7 +7,7 @@
  *
  * Ported from Mr-Computer/automations/argentine-spanish-bot/src/services/learning-by-examples.js
  *
- * @module symbiote-node/packs/ai/lesson-generate
+ * @module symbiote-engine/packs/ai/lesson-generate
  */
 
 import { readFile, readdir } from 'node:fs/promises';

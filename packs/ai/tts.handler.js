@@ -12,7 +12,7 @@
  *
  * SSH mode expects TTS_REMOTE_HOST and TTS_REMOTE_PATH, or matching params.
  *
- * @module symbiote-node/packs/ai/tts
+ * @module symbiote-engine/packs/ai/tts
  */
 
 import { promises as fs } from 'fs';
@@ -143,10 +143,10 @@ async function executeSSH(text, params) {
   let venv = params.remoteVenv || process.env.TTS_REMOTE_VENV || `${remotePath}/venv`;
   let device = params.device || process.env.PODCAST_TTS_DEVICE || 'cuda';
 
-  let outDir = params.outputDir || path.join(os.tmpdir(), 'symbiote-node-tts');
+  let outDir = params.outputDir || path.join(os.tmpdir(), 'symbiote-engine-tts');
   let taskId = `tts_${Date.now()}`;
   let localWav = path.join(outDir, `${taskId}.wav`);
-  let remoteTmpDir = '/tmp/symbiote-node-tts';
+  let remoteTmpDir = '/tmp/symbiote-engine-tts';
 
   try {
     if (!host || !remotePath || !venv) {
@@ -232,7 +232,7 @@ async function executeSSH(text, params) {
  */
 async function executeHTTP(text, params) {
   let endpoint = params.endpoint || process.env.TTS_SERVER_URL || 'http://localhost:5008';
-  let outDir = params.outputDir || path.join(os.tmpdir(), 'symbiote-node-tts');
+  let outDir = params.outputDir || path.join(os.tmpdir(), 'symbiote-engine-tts');
   let taskId = `tts_${Date.now()}`;
   let outputPath = path.join(outDir, `${taskId}.wav`);
 

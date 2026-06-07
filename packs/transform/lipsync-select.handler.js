@@ -8,7 +8,7 @@
  *
  * Ported from Mr-Computer/modules/ai-music-video/src/services/lipsync-selector.js
  *
- * @module symbiote-node/packs/transform/lipsync-select
+ * @module symbiote-engine/packs/transform/lipsync-select
  */
 
 export default {

@@ -4,7 +4,7 @@
  * Replaces {{variable}} placeholders in template string with values from data object.
  * Supports nested access via dot notation: {{user.name}}.
  *
- * @module symbiote-node/packs/transform/template
+ * @module symbiote-engine/packs/transform/template
  */
 
 export default {

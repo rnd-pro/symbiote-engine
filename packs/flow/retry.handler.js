@@ -4,7 +4,7 @@
  * If input has an error, re-invokes the action up to maxRetries times.
  * Passes through successful results immediately.
  *
- * @module symbiote-node/packs/flow/retry
+ * @module symbiote-engine/packs/flow/retry
  */
 
 export default {

@@ -5,7 +5,7 @@
  * to push data downstream. Use for testing any part of a workflow
  * by connecting to the target node's input.
  *
- * @module symbiote-node/packs/debug/inject
+ * @module symbiote-engine/packs/debug/inject
  */
 
 export default {

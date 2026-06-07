@@ -8,7 +8,7 @@
  *
  * Like n8n's "Set" node — reshapes data between nodes.
  *
- * @module symbiote-node/packs/transform/set
+ * @module symbiote-engine/packs/transform/set
  */
 
 export default {

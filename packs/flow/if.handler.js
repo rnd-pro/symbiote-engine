@@ -4,7 +4,7 @@
  * Routes data to 'true' or 'false' output based on condition.
  * Condition can be a boolean input or a simple expression string.
  *
- * @module symbiote-node/packs/flow/if
+ * @module symbiote-engine/packs/flow/if
  */
 
 /**

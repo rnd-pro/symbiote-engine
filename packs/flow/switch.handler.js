@@ -4,7 +4,7 @@
  * Routes data to one of N case outputs based on value match.
  * Falls back to 'default' output if no case matches.
  *
- * @module symbiote-node/packs/flow/switch
+ * @module symbiote-engine/packs/flow/switch
  */
 
 export default {

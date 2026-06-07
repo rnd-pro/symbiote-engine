@@ -7,7 +7,7 @@
  * This is a generic node — the DB connection is injected by the host application
  * via context.db (postgres tagged template instance).
  *
- * @module symbiote-node/packs/data/db-query
+ * @module symbiote-engine/packs/data/db-query
  */
 
 export default {

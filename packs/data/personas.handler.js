@@ -14,7 +14,7 @@
  *   list    — list all personas (optionally filtered)
  *   random  — pick N random personas
  *
- * @module symbiote-node/packs/data/personas
+ * @module symbiote-engine/packs/data/personas
  */
 
 /** @typedef {Object} Persona

@@ -11,7 +11,7 @@
  *   POST /session/:id/message → send prompt (fire & forget)
  *   Poll output file → wait for JSON result
  *
- * @module symbiote-node/packs/ai/opencode
+ * @module symbiote-engine/packs/ai/opencode
  */
 
 import { promises as fs } from 'fs';
@@ -78,7 +78,7 @@ export default {
 
 
       let workspace =
-        outputDir || process.env.OPENCODE_WORKSPACE || path.join(os.tmpdir(), 'symbiote-node-opencode');
+        outputDir || process.env.OPENCODE_WORKSPACE || path.join(os.tmpdir(), 'symbiote-engine-opencode');
       await fs.mkdir(workspace, { recursive: true });
 
       let taskPath = path.join(workspace, 'task.json');
@@ -89,7 +89,7 @@ export default {
         taskPath,
         JSON.stringify(
           {
-            type: 'symbiote-node-ai',
+            type: 'symbiote-engine-ai',
             prompt,
             context,
             timestamp: Date.now(),
@@ -114,7 +114,7 @@ export default {
         let sessionRes = await fetch(`${baseUrl}/session`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: `symbiote-node ${Date.now()}` }),
+          body: JSON.stringify({ title: `symbiote-engine ${Date.now()}` }),
           signal: requestSignal(30000, params.signal),
         });
 

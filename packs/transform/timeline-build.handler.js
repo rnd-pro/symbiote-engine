@@ -13,7 +13,7 @@
  * Simplified port of TimelineGenerator from
  * Mr-Computer/modules/ai-music-video/src/services/timeline-generator.js
  *
- * @module symbiote-node/packs/transform/timeline-build
+ * @module symbiote-engine/packs/transform/timeline-build
  */
 
 export default {

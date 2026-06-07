@@ -4,7 +4,7 @@
  * Every node can define lifecycle hooks: validate, cacheKey, execute, postProcess.
  * The lifecycle runner orchestrates these steps with cache awareness.
  *
- * @module symbiote-node/Lifecycle
+ * @module symbiote-engine/Lifecycle
  */
 
 /**

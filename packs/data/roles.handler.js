@@ -7,7 +7,7 @@
  *
  * Ported from Mr-Computer/modules/razrab-bot/src/services/roles-service.js
  *
- * @module symbiote-node/packs/data/roles
+ * @module symbiote-engine/packs/data/roles
  */
 
 import { readFile, readdir } from 'node:fs/promises';

@@ -10,7 +10,7 @@
  *
  * Ported from Mr-Computer/modules/ai-music-video/src/services/effects-skeleton.js
  *
- * @module symbiote-node/packs/transform/effects-skeleton
+ * @module symbiote-engine/packs/transform/effects-skeleton
  */
 
 export default {

@@ -7,7 +7,7 @@
  *
  * Ported from Mr-Computer/automations/argentine-spanish-bot/src/services/contentAdaptationService.js
  *
- * @module symbiote-node/packs/ai/content-adapt
+ * @module symbiote-engine/packs/ai/content-adapt
  */
 
 /**

@@ -4,7 +4,7 @@
  * Waits for specified milliseconds, then passes input value through.
  * Useful for rate limiting, animation timing, and API cooldowns.
  *
- * @module symbiote-node/packs/util/delay
+ * @module symbiote-engine/packs/util/delay
  */
 
 export default {

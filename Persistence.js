@@ -4,7 +4,7 @@
  * Serializes Graph to .workflow.json and loads it back.
  * Works in Node.js (fs) and browser (Blob/FileReader).
  *
- * @module symbiote-node/Persistence
+ * @module symbiote-engine/Persistence
  */
 
 import { Graph } from './Graph.js';

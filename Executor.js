@@ -6,7 +6,7 @@
  * cache, async node processing, dynamic sockets,
  * and compound node sub-graph execution.
  *
- * @module symbiote-node/Executor
+ * @module symbiote-engine/Executor
  */
 
 import { getNodeType } from './Registry.js';

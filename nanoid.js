@@ -4,7 +4,7 @@
  * Generates short unique IDs (8 chars) for nodes, workflows, etc.
  * No dependencies. Crypto-based when available, Math.random fallback.
  *
- * @module symbiote-node/nanoid
+ * @module symbiote-engine/nanoid
  */
 
 const ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz';

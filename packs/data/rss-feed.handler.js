@@ -6,7 +6,7 @@
  *
  * Ported from Mr-Computer/automations/argentine-spanish-bot/src/services/rss-feed.js
  *
- * @module symbiote-node/packs/data/rss-feed */
+ * @module symbiote-engine/packs/data/rss-feed */
 
 /**
  * Build an abort signal for request timeout handling.
@@ -284,7 +284,7 @@ export default {
           fetch: async () => {
             let response = await fetch(inputs.url, {
               signal: requestSignal(timeout, params.signal),
-              headers: { 'User-Agent': 'symbiote-node/rss-feed/1.0' },
+              headers: { 'User-Agent': 'symbiote-engine/rss-feed/1.0' },
             });
             if (!response.ok) return { error: `HTTP ${response.status}: ${response.statusText}` };
 
@@ -311,7 +311,7 @@ export default {
               try {
                 let response = await fetch(url, {
                   signal: requestSignal(timeout, params.signal),
-                  headers: { 'User-Agent': 'symbiote-node/rss-feed/1.0' },
+                  headers: { 'User-Agent': 'symbiote-engine/rss-feed/1.0' },
                 });
                 if (!response.ok) {
                   errors.push({ url, error: `HTTP ${response.status}` });

@@ -4,7 +4,7 @@
  * Stores deep-cloned snapshots of nodes and connections.
  * Framework-agnostic — works with any graph data.
  *
- * @module symbiote-node/History
+ * @module symbiote-engine/History
  */
 
 const MAX_HISTORY = 50;

@@ -1,10 +1,10 @@
 /**
- * video-pack.js - Video domain pack for symbiote-node
+ * video-pack.js - Video domain pack for symbiote-engine
  *
  * Registers video-specific node types and socket types.
  * Extracted from symbiote-video/src/graph/NodeTypes.js + NodeProcessors.js.
  *
- * @module symbiote-node/packs/video-pack
+ * @module symbiote-engine/packs/video-pack
  */
 
 import { registerPack } from '../index.js';

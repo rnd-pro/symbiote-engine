@@ -7,7 +7,7 @@
  *
  * SSH mode expects WHISPER_REMOTE_HOST and WHISPER_REMOTE_PATH, or matching params.
  *
- * @module symbiote-node/packs/ai/whisper
+ * @module symbiote-engine/packs/ai/whisper
  */
 
 import { promises as fs } from 'fs';
@@ -103,7 +103,7 @@ async function executeSSH(audioPath, params) {
   let model = params.model || process.env.WHISPER_MODEL || 'medium';
   let device = params.device || process.env.WHISPER_DEVICE || 'cuda';
   let language = params.language || 'es';
-  let remoteTmpDir = '/tmp/symbiote-node-whisper';
+  let remoteTmpDir = '/tmp/symbiote-engine-whisper';
 
   try {
     if (!host || !remotePath || !venv) {

@@ -10,7 +10,7 @@
  *
  * Uses Python librosa library on a configured remote server via SSH.
  *
- * @module symbiote-node/packs/ai/beat-detect
+ * @module symbiote-engine/packs/ai/beat-detect
  */
 
 import { promises as fs } from 'fs';
@@ -124,7 +124,7 @@ async function executeSSH(audioPath, params) {
   let sr = params.sampleRate || parseInt(process.env.BEAT_SAMPLE_RATE, 10) || 22050;
   let hop = params.hopLength || parseInt(process.env.BEAT_HOP_LENGTH, 10) || 512;
   let pps = params.peaksPerSecond || 10;
-  let remoteTmpDir = '/tmp/symbiote-node-beat';
+  let remoteTmpDir = '/tmp/symbiote-engine-beat';
 
   try {
     if (!host || !remotePath || !venv) {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0-alpha.7
+
+- Updated runtime identity strings, log prefixes, temporary workspace names, and handler metadata to use `symbiote-engine`.
+
 ## 0.3.0-alpha.6
 
 - Updated package metadata to point at the standalone `symbiote-engine` repository.

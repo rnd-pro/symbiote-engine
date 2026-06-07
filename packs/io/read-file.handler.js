@@ -3,7 +3,7 @@
  *
  * Reads a file from disk. Auto-parses JSON files.
  *
- * @module symbiote-node/packs/io/read-file
+ * @module symbiote-engine/packs/io/read-file
  */
 
 import { promises as fs } from 'fs';

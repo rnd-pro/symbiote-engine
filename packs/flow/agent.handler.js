@@ -5,7 +5,7 @@
  * The agent bridge is injected via params.agentBridge or a global registry.
  * Without a bridge, returns a placeholder indicating agent invocation is needed.
  *
- * @module symbiote-node/packs/flow/agent */
+ * @module symbiote-engine/packs/flow/agent */
 
 export default {
   type: 'flow/agent',

@@ -11,7 +11,7 @@
  *
  * Ported from Mr-Computer/modules/ai-music-video/src/services/kling-lipsync.js
  *
- * @module symbiote-node/packs/ai/kling-lipsync
+ * @module symbiote-engine/packs/ai/kling-lipsync
  */
 
 import { createHmac } from 'crypto';
