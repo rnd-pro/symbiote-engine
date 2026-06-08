@@ -7,7 +7,7 @@
  * @module symbiote-engine/packs/video-pack
  */
 
-import { registerPack } from '../index.js';
+import { registerPack } from '../Registry.js';
 
 /**
  * Video-domain socket types

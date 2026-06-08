@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { readFile } from 'node:fs/promises';
 
 test('root engine API imports in Node', async () => {
   let engine = await import('../index.js');
@@ -39,6 +40,13 @@ test('browser engine API excludes Node-only runtime modules', async () => {
   assert.equal(typeof engine.createSourceDocument, 'function');
   assert.equal(engine.loadHandlers, undefined);
   assert.equal(engine.createServer, undefined);
+});
+
+test('video pack stays on the browser-safe registry path', async () => {
+  let source = await readFile(new URL('../packs/video-pack.js', import.meta.url), 'utf8');
+
+  assert.match(source, /from ['"]\.\.\/Registry\.js['"]/);
+  assert.doesNotMatch(source, /from ['"]\.\.\/index\.js['"]/);
 });
 
 test('resource tree contract builds normalized nested file trees', async () => {

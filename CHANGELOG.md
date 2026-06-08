@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.0-alpha.11
+
+- Kept `packs/video-pack.js` browser-safe by registering through the registry primitive instead of the Node-only root entrypoint.
+
 ## 0.3.0-alpha.10
 
 - Added `symbiote-engine/browser`, a browser-safe runtime entrypoint for UI packages.
