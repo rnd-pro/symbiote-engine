@@ -27,6 +27,20 @@ test('contracts entrypoint imports in Node', async () => {
   assert.equal(typeof contracts.createMemoryPersistenceAdapter, 'function');
 });
 
+test('browser engine API excludes Node-only runtime modules', async () => {
+  let engine = await import('../browser.js');
+
+  assert.equal(typeof engine.Graph, 'function');
+  assert.equal(typeof engine.Executor, 'function');
+  assert.equal(typeof engine.registerNodeType, 'function');
+  assert.equal(typeof engine.serialize, 'function');
+  assert.equal(typeof engine.deserialize, 'function');
+  assert.equal(typeof engine.FocusController, 'function');
+  assert.equal(typeof engine.createSourceDocument, 'function');
+  assert.equal(engine.loadHandlers, undefined);
+  assert.equal(engine.createServer, undefined);
+});
+
 test('resource tree contract builds normalized nested file trees', async () => {
   let { buildResourceTreeFromEntries } = await import('../contracts/index.js');
   let tree = buildResourceTreeFromEntries([

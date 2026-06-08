@@ -15,6 +15,13 @@ It must stay independent from browser UI runtime modules.
 import { Graph, Executor, loadHandlers } from 'symbiote-engine';
 ```
 
+Browser UI code must use the browser-safe runtime entrypoint so client imports
+do not pull Node-only server, CLI, handler-loader, or file-watch modules:
+
+```js
+import { Graph, Executor, deserialize } from 'symbiote-engine/browser';
+```
+
 Use `symbiote-ui` for provider catalogs, Web Components, layout metadata, and WebMCP descriptors.
 
 ## Related Packages

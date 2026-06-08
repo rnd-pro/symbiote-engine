@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0-alpha.10
+
+- Added `symbiote-engine/browser`, a browser-safe runtime entrypoint for UI packages.
+- Kept Node-only handler loading, server, CLI, and file-system helpers out of browser imports.
+
 ## 0.3.0-alpha.7
 
 - Updated runtime identity strings, log prefixes, temporary workspace names, and handler metadata to use `symbiote-engine`.

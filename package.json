@@ -1,12 +1,13 @@
 {
   "name": "symbiote-engine",
-  "version": "0.3.0-alpha.9",
+  "version": "0.3.0-alpha.10",
   "description": "Universal node-based execution engine. Domain-agnostic graph runtime.",
   "private": false,
   "type": "module",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
+    "./browser": "./browser.js",
     "./cli": "./cli.js",
     "./contracts": "./contracts/index.js",
     "./contracts/*": "./contracts/*",
