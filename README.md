@@ -27,5 +27,6 @@ Use `symbiote-ui` for provider catalogs, Web Components, layout metadata, and We
 ## Related Packages
 
 - [`symbiote-ui`](https://github.com/RND-PRO/symbiote-ui) - Web Components, provider catalogs, layout metadata, and WebMCP descriptors.
+- [`symbiote-workspace`](https://github.com/RND-PRO/symbiote-workspace) - workspace orchestration, plugin system, server mode, and portable configs.
 - [`symbiote-node`](https://github.com/RND-PRO/symbiote-node) - terminal migration facade for older imports.
 - [Package split guide](https://github.com/RND-PRO/symbiote-node/blob/main/docs/package-split.md)
