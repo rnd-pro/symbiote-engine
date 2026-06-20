@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0-alpha.12
+
 - Added `llms.txt` as a compact agent-facing resource map and included it in
   the published package.
 - Updated the public README and package description to match the shared
