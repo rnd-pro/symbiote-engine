@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added `llms.txt` as a compact agent-facing resource map and included it in
+  the published package.
 - Updated the public README and package description to match the shared
   RND-PRO package presentation style.
 

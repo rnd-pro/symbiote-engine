@@ -28,6 +28,7 @@
     "contracts/",
     "packs/",
     "README.md",
+    "llms.txt",
     "CHANGELOG.md",
     "LICENSE"
   ],
