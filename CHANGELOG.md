@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Updated the public README and package description to match the shared
+  RND-PRO package presentation style.
+
 ## 0.3.0-alpha.11
 
 - Kept `packs/video-pack.js` browser-safe by registering through the registry primitive instead of the Node-only root entrypoint.
