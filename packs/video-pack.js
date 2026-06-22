@@ -361,6 +361,114 @@ let nodes = [
       },
     },
   },
+
+
+  {
+    type: 'source/shape',
+    category: 'source',
+    icon: 'category',
+    driver: {
+      description: 'Vector shape generator',
+      capabilities: ['source', 'shape'],
+      inputs: [],
+      outputs: [{ name: 'image', type: 'image' }],
+      params: {
+        shape: {
+          type: 'string',
+          default: 'rect',
+          enum: ['rect', 'ellipse', 'triangle', 'polygon', 'star'],
+        },
+        width: { type: 'int', default: 200, min: 1 },
+        height: { type: 'int', default: 200, min: 1 },
+        fill: { type: 'string', default: '#FFFFFF' },
+        stroke: { type: 'string', default: 'none' },
+        strokeWidth: { type: 'int', default: 0, min: 0 },
+        cornerRadius: { type: 'int', default: 0, min: 0 },
+        points: { type: 'int', default: 5, min: 3, max: 20 },
+      },
+    },
+  },
+  {
+    type: 'source/gif',
+    category: 'source',
+    icon: 'gif',
+    driver: {
+      description: 'Animated GIF source',
+      capabilities: ['source', 'image', 'animated'],
+      inputs: [],
+      outputs: [
+        { name: 'image', type: 'image' },
+        { name: 'duration', type: 'float' },
+      ],
+      params: {
+        src: { type: 'string', required: true, description: 'GIF file path or URL' },
+        loop: { type: 'boolean', default: true },
+        speed: { type: 'float', default: 1.0, min: 0.1, max: 4 },
+      },
+    },
+  },
+  {
+    type: 'source/lottie',
+    category: 'source',
+    icon: 'animation',
+    driver: {
+      description: 'Lottie animation source',
+      capabilities: ['source', 'animated', 'vector'],
+      inputs: [],
+      outputs: [{ name: 'image', type: 'image' }],
+      params: {
+        src: { type: 'string', required: true, description: 'Lottie JSON path or URL' },
+        loop: { type: 'boolean', default: true },
+        speed: { type: 'float', default: 1.0, min: 0.1, max: 4 },
+      },
+    },
+  },
+  {
+    type: 'processing/motion-blur',
+    category: 'processing',
+    icon: 'motion_blur',
+    driver: {
+      description: 'Directional motion blur',
+      capabilities: ['effects', 'blur'],
+      inputs: [{ name: 'input', type: 'image', required: true }],
+      outputs: [{ name: 'output', type: 'image' }],
+      params: {
+        shutterAngle: { type: 'int', default: 180, min: 0, max: 360 },
+        samples: { type: 'int', default: 10, min: 2, max: 64 },
+      },
+    },
+  },
+  {
+    type: 'processing/blur',
+    category: 'processing',
+    icon: 'blur_on',
+    driver: {
+      description: 'Gaussian or box blur filter',
+      capabilities: ['effects', 'blur'],
+      inputs: [{ name: 'input', type: 'image', required: true }],
+      outputs: [{ name: 'output', type: 'image' }],
+      params: {
+        radius: { type: 'float', default: 4, min: 0, max: 100 },
+        kind: { type: 'string', default: 'gaussian', enum: ['gaussian', 'box'] },
+      },
+    },
+  },
+  {
+    type: 'processing/chroma-key',
+    category: 'processing',
+    icon: 'background_replace',
+    driver: {
+      description: 'Chroma key (green screen) removal',
+      capabilities: ['effects', 'keying'],
+      inputs: [{ name: 'input', type: 'image', required: true }],
+      outputs: [{ name: 'output', type: 'image' }],
+      params: {
+        keyColor: { type: 'string', default: '#00FF00' },
+        similarity: { type: 'float', default: 0.4, min: 0, max: 1 },
+        smoothness: { type: 'float', default: 0.1, min: 0, max: 1 },
+      },
+    },
+  },
 ];
 
 /**
