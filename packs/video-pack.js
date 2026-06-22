@@ -110,6 +110,45 @@ let nodes = [
       text: { content: params.content, style: params.style },
     }),
   },
+  {
+    type: 'source/video',
+    category: 'source',
+    icon: 'movie',
+    driver: {
+      description: 'Video file source',
+      capabilities: ['source', 'video'],
+      inputs: [],
+      outputs: [
+        { name: 'video', type: 'image' },
+        { name: 'duration', type: 'float' },
+      ],
+      params: {
+        src: { type: 'string', required: true, description: 'Video file path or URL' },
+        trimBefore: { type: 'int', default: 0, min: 0 },
+        trimAfter: { type: 'int', default: 0, min: 0 },
+        volume: { type: 'float', default: 1.0, min: 0, max: 2 },
+        fit: { type: 'string', default: 'cover', enum: ['cover', 'contain', 'fill', 'none'] },
+      },
+    },
+  },
+  {
+    type: 'source/captions',
+    category: 'source',
+    icon: 'closed_caption',
+    driver: {
+      description: 'Audio-synced captions',
+      capabilities: ['source', 'text', 'captions'],
+      inputs: [],
+      outputs: [{ name: 'text', type: 'string' }],
+      params: {
+        content: { type: 'string', default: '' },
+        wordTimings: { type: 'string', default: '' },
+        style: { type: 'string', default: 'tiktok', enum: ['tiktok', 'subtitle', 'karaoke'] },
+        highlightColor: { type: 'string', default: '#FFE66D' },
+        wordsPerScreen: { type: 'int', default: 3, min: 1, max: 10 },
+      },
+    },
+  },
 
 
   {
@@ -219,7 +258,7 @@ let nodes = [
         type: {
           type: 'string',
           default: 'fade',
-          enum: ['fade', 'slide', 'wipe', 'zoom', 'dissolve'],
+          enum: ['fade', 'slide', 'wipe', 'zoom', 'dissolve', 'flip', 'clockWipe', 'iris'],
         },
         duration: { type: 'int', default: 30, min: 1 },
         direction: { type: 'string', default: 'left', enum: ['left', 'right', 'up', 'down'] },
