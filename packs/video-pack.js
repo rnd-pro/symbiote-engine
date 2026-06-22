@@ -18,6 +18,10 @@ let socketTypes = {
   timeline: { color: '#5090C7', label: 'Timeline', compatible: ['timeline'] },
   skeleton: { color: '#90C750', label: 'Skeleton', compatible: ['skeleton'] },
   effect: { color: '#C750C7', label: 'Effect', compatible: ['effect'] },
+  vector: { color: '#6363C7', label: 'Vector', compatible: ['vector'] },
+  color: { color: '#C7C729', label: 'Color', compatible: ['color'] },
+  geometry: { color: '#00D6A3', label: 'Geometry', compatible: ['geometry'] },
+  layer: { color: '#FF6B6B', label: 'Layer', compatible: ['layer'] },
 };
 
 /**
