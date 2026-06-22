@@ -469,6 +469,111 @@ let nodes = [
       },
     },
   },
+  {
+    type: 'source/solid',
+    category: 'source',
+    icon: 'square',
+    driver: {
+      description: 'Solid color fill',
+      capabilities: ['source', 'generator'],
+      inputs: [],
+      outputs: [{ name: 'image', type: 'image' }],
+      params: {
+        color: { type: 'string', default: '#000000' },
+        width: { type: 'int', default: 1080, min: 1 },
+        height: { type: 'int', default: 1920, min: 1 },
+      },
+    },
+  },
+  {
+    type: 'source/gradient',
+    category: 'source',
+    icon: 'gradient',
+    driver: {
+      description: 'Gradient fill',
+      capabilities: ['source', 'generator'],
+      inputs: [],
+      outputs: [{ name: 'image', type: 'image' }],
+      params: {
+        kind: { type: 'string', default: 'linear', enum: ['linear', 'radial'] },
+        from: { type: 'string', default: '#000000' },
+        to: { type: 'string', default: '#FFFFFF' },
+        angle: { type: 'int', default: 90, min: 0, max: 360 },
+        width: { type: 'int', default: 1080, min: 1 },
+        height: { type: 'int', default: 1920, min: 1 },
+      },
+    },
+  },
+  {
+    type: 'processing/transform',
+    category: 'processing',
+    icon: 'transform',
+    driver: {
+      description: 'Scale, rotate, translate, opacity',
+      capabilities: ['effects', 'transform'],
+      inputs: [{ name: 'input', type: 'image', required: true }],
+      outputs: [{ name: 'output', type: 'image' }],
+      params: {
+        scale: { type: 'float', default: 1, min: 0, max: 10 },
+        rotate: { type: 'float', default: 0, min: -360, max: 360 },
+        translateX: { type: 'int', default: 0 },
+        translateY: { type: 'int', default: 0 },
+        opacity: { type: 'float', default: 1, min: 0, max: 1 },
+        anchor: { type: 'string', default: 'center' },
+      },
+    },
+  },
+  {
+    type: 'processing/crop',
+    category: 'processing',
+    icon: 'crop',
+    driver: {
+      description: 'Crop a region of the input',
+      capabilities: ['effects', 'transform'],
+      inputs: [{ name: 'input', type: 'image', required: true }],
+      outputs: [{ name: 'output', type: 'image' }],
+      params: {
+        x: { type: 'int', default: 0, min: 0 },
+        y: { type: 'int', default: 0, min: 0 },
+        width: { type: 'int', default: 100, min: 1 },
+        height: { type: 'int', default: 100, min: 1 },
+        unit: { type: 'string', default: 'percent', enum: ['percent', 'pixel'] },
+      },
+    },
+  },
+  {
+    type: 'processing/mask',
+    category: 'processing',
+    icon: 'masks',
+    driver: {
+      description: 'Apply an alpha mask from a second input',
+      capabilities: ['effects', 'compositing'],
+      inputs: [
+        { name: 'input', type: 'image', required: true },
+        { name: 'mask', type: 'image', required: true },
+      ],
+      outputs: [{ name: 'output', type: 'image' }],
+      params: {
+        invert: { type: 'boolean', default: false },
+        feather: { type: 'float', default: 0, min: 0, max: 100 },
+      },
+    },
+  },
+  {
+    type: 'processing/speed',
+    category: 'processing',
+    icon: 'speed',
+    driver: {
+      description: 'Time remap: change playback speed or reverse',
+      capabilities: ['effects', 'time'],
+      inputs: [{ name: 'input', type: 'any', required: true }],
+      outputs: [{ name: 'output', type: 'any' }],
+      params: {
+        factor: { type: 'float', default: 1, min: 0.1, max: 10 },
+        reverse: { type: 'boolean', default: false },
+      },
+    },
+  },
 ];
 
 /**
