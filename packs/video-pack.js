@@ -44,6 +44,11 @@ let nodes = [
       params: {
         src: { type: 'string', required: true, description: 'Audio file path or URL' },
         volume: { type: 'float', default: 1.0, min: 0, max: 2 },
+        startSec: { type: 'float', default: 0, min: 0, description: 'Start offset on the timeline (seconds)' },
+        durationSec: { type: 'float', min: 0, description: 'Clip length on the timeline (seconds); omit for full asset' },
+        trimStartSec: { type: 'float', default: 0, min: 0, description: 'Seconds to skip into the source asset before playback' },
+        fadeInSec: { type: 'float', default: 0, min: 0, description: 'Fade-in length (seconds)' },
+        fadeOutSec: { type: 'float', default: 0, min: 0, description: 'Fade-out length (seconds)' },
       },
     },
     process: (_inputs, params) => ({
