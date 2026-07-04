@@ -1,0 +1,148 @@
+const RENDER_PROVIDER_KINDS = new Set(['screencast']);
+const AUDIO_PROVIDER_KINDS = new Set(['browser-tts', 'local-tts']);
+
+function fail(path, message) {
+  throw new Error(`${path}: ${message}`);
+}
+
+function cleanString(value, fallback = '') {
+  let text = String(value ?? fallback ?? '').replace(/\s+/g, ' ').trim();
+  return text && text !== 'undefined' && text !== 'null' ? text : String(fallback || '').trim();
+}
+
+function requireObject(value, path) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail(path, 'must be an object');
+  }
+  return value;
+}
+
+function positiveNumber(value, fallback, path) {
+  let number = Number(value ?? fallback);
+  if (!Number.isFinite(number) || number <= 0) fail(path, 'must be a positive number');
+  return number;
+}
+
+function positiveInteger(value, fallback, path) {
+  return Math.round(positiveNumber(value, fallback, path));
+}
+
+function normalizeKind(value, supported, fallback, path) {
+  let kind = cleanString(value, fallback);
+  if (!supported.has(kind)) {
+    fail(path, `unsupported kind "${kind}". Supported: ${[...supported].join(', ')}`);
+  }
+  return kind;
+}
+
+export function normalizeRenderProvider(provider = {}) {
+  requireObject(provider, 'renderProvider');
+  let id = cleanString(provider.id, '');
+  if (!id) fail('renderProvider.id', 'is required');
+  let kind = normalizeKind(provider.kind, RENDER_PROVIDER_KINDS, 'screencast', 'renderProvider.kind');
+  if (typeof provider.execute !== 'function') {
+    fail('renderProvider.execute', 'is required');
+  }
+  return {
+    id,
+    kind,
+    execute: provider.execute,
+  };
+}
+
+export function normalizeRenderJob(job = {}) {
+  requireObject(job, 'renderJob');
+  let providerId = cleanString(job.providerId, job.renderProvider?.id);
+  if (!providerId) fail('renderJob.providerId', 'is required');
+  let kind = normalizeKind(
+    job.kind,
+    RENDER_PROVIDER_KINDS,
+    job.renderProvider?.kind || 'screencast',
+    'renderJob.kind',
+  );
+  return {
+    ...job,
+    id: cleanString(job.id, 'render-job') || 'render-job',
+    kind,
+    providerId,
+  };
+}
+
+export function normalizeRenderArtifact(result = {}, context = {}) {
+  requireObject(result, 'renderArtifact');
+  let path = cleanString(result.path, '');
+  if (!path) fail('renderArtifact.path', 'is required');
+  let providerId = cleanString(result.providerId, context.providerId);
+  if (!providerId) fail('renderArtifact.providerId', 'is required');
+  let kind = normalizeKind(
+    result.kind,
+    RENDER_PROVIDER_KINDS,
+    context.kind || 'screencast',
+    'renderArtifact.kind',
+  );
+  return {
+    path,
+    kind,
+    providerId,
+    frames: positiveInteger(result.frames, undefined, 'renderArtifact.frames'),
+    fps: positiveNumber(result.fps, undefined, 'renderArtifact.fps'),
+    durationSec: positiveNumber(result.durationSec, undefined, 'renderArtifact.durationSec'),
+    width: positiveInteger(result.width, undefined, 'renderArtifact.width'),
+    height: positiveInteger(result.height, undefined, 'renderArtifact.height'),
+  };
+}
+
+export function createRenderProviderRegistry(providers = []) {
+  let registry = new Map();
+
+  function register(provider) {
+    let normalized = normalizeRenderProvider(provider);
+    if (registry.has(normalized.id)) {
+      fail('renderProvider.id', `duplicate provider "${normalized.id}"`);
+    }
+    registry.set(normalized.id, normalized);
+    return normalized;
+  }
+
+  for (let provider of providers) {
+    register(provider);
+  }
+
+  return {
+    register,
+    get(id) {
+      return registry.get(cleanString(id, ''));
+    },
+    list() {
+      return [...registry.values()].map(({ id, kind }) => ({ id, kind }));
+    },
+    async execute(job, options) {
+      let normalizedJob = normalizeRenderJob(job);
+      let provider = registry.get(normalizedJob.providerId);
+      if (!provider) {
+        fail('renderJob.providerId', `unknown provider "${normalizedJob.providerId}"`);
+      }
+      if (provider.kind !== normalizedJob.kind) {
+        fail(
+          'renderJob.kind',
+          `provider "${provider.id}" handles "${provider.kind}", got "${normalizedJob.kind}"`,
+        );
+      }
+      let result = await provider.execute(normalizedJob, options);
+      return normalizeRenderArtifact(result, {
+        providerId: provider.id,
+        kind: provider.kind,
+      });
+    },
+  };
+}
+
+export function normalizeAudioProviderDescriptor(provider = {}) {
+  requireObject(provider, 'audioProvider');
+  let id = cleanString(provider.id, '');
+  if (!id) fail('audioProvider.id', 'is required');
+  return {
+    id,
+    kind: normalizeKind(provider.kind, AUDIO_PROVIDER_KINDS, 'browser-tts', 'audioProvider.kind'),
+  };
+}

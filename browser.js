@@ -45,7 +45,12 @@ export {
   createMemoryPersistenceAdapter,
   createPersistenceAdapter,
   createSourceDocument,
+  createRenderProviderRegistry,
   normalizeResourceTree,
   normalizeResourceTreeItem,
+  normalizeAudioProviderDescriptor,
+  normalizeRenderArtifact,
+  normalizeRenderJob,
+  normalizeRenderProvider,
   normalizeSourceDocument,
 } from './contracts/index.js';

@@ -8,8 +8,11 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.Graph, 'function');
   assert.equal(typeof engine.Executor, 'function');
   assert.equal(typeof engine.loadHandlers, 'function');
+  assert.equal(typeof engine.createRenderProviderRegistry, 'function');
+  assert.equal(typeof engine.createLocalBrowserScreencastProvider, 'function');
   assert.equal(typeof engine.normalizeResourceTreeItem, 'function');
   assert.equal(typeof engine.normalizeSourceDocument, 'function');
+  assert.equal(typeof engine.normalizeRenderArtifact, 'function');
   assert.equal(typeof engine.createPersistenceAdapter, 'function');
 });
 
@@ -40,6 +43,8 @@ test('browser engine API excludes Node-only runtime modules', async () => {
   assert.equal(typeof engine.createSourceDocument, 'function');
   assert.equal(engine.loadHandlers, undefined);
   assert.equal(engine.createServer, undefined);
+  assert.equal(engine.createLocalBrowserScreencastProvider, undefined);
+  assert.equal(typeof engine.createRenderProviderRegistry, 'function');
 });
 
 test('video pack stays on the browser-safe registry path', async () => {

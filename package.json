@@ -14,6 +14,7 @@
     "./FocusController.js": "./FocusController.js",
     "./Graph.js": "./Graph.js",
     "./GraphServer.js": "./GraphServer.js",
+    "./providers/*": "./providers/*",
     "./packs/*": "./packs/*",
     "./package.json": "./package.json"
   },
@@ -26,6 +27,7 @@
   "files": [
     "*.js",
     "contracts/",
+    "providers/",
     "packs/",
     "README.md",
     "llms.txt",
