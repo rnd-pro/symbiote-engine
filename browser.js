@@ -42,10 +42,18 @@ export { FocusController } from './FocusController.js';
 
 export {
   buildResourceTreeFromEntries,
+  createAudioProviderNotReadyError,
   createMemoryPersistenceAdapter,
+  createAudioCacheKey,
+  createAudioProviderRegistry,
   createPersistenceAdapter,
   createSourceDocument,
   createRenderProviderRegistry,
+  isAudioProviderNotReadyError,
+  normalizeAudioArtifact,
+  normalizeAudioJob,
+  normalizeAudioProvider,
+  normalizeAudioProviderReadiness,
   normalizeResourceTree,
   normalizeResourceTreeItem,
   normalizeAudioProviderDescriptor,
@@ -53,4 +61,5 @@ export {
   normalizeRenderJob,
   normalizeRenderProvider,
   normalizeSourceDocument,
+  normalizeVoiceReference,
 } from './contracts/index.js';

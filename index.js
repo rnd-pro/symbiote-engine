@@ -51,10 +51,18 @@ export { FocusController } from './FocusController.js';
 
 export {
   buildResourceTreeFromEntries,
+  createAudioProviderNotReadyError,
   createMemoryPersistenceAdapter,
+  createAudioCacheKey,
+  createAudioProviderRegistry,
   createPersistenceAdapter,
   createSourceDocument,
   createRenderProviderRegistry,
+  isAudioProviderNotReadyError,
+  normalizeAudioArtifact,
+  normalizeAudioJob,
+  normalizeAudioProvider,
+  normalizeAudioProviderReadiness,
   normalizeResourceTree,
   normalizeResourceTreeItem,
   normalizeAudioProviderDescriptor,
@@ -62,6 +70,11 @@ export {
   normalizeRenderJob,
   normalizeRenderProvider,
   normalizeSourceDocument,
+  normalizeVoiceReference,
 } from './contracts/index.js';
 
 export { createLocalBrowserScreencastProvider } from './providers/local-browser-screencast.js';
+export { createFileArtifactStore } from './artifacts.js';
+export { createAudioProviderJobQueue } from './provider-jobs.js';
+export { createLocalAudioTtsProvider } from './providers/local-audio-tts.js';
+export { createLocalAudioTranscribeProvider } from './providers/local-audio-transcribe.js';

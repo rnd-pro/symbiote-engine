@@ -45,6 +45,8 @@ metadata, and browser UI.
   compatible-node lookup, parameter validation, and hot-loadable handlers.
 - **Portable host contracts** — normalized source documents, resource trees, and
   persistence adapters for agent and editor surfaces.
+- **Local media provider primitives** — audio provider contracts, provider-job
+  queues, content-addressed artifacts, and injectable local TTS providers.
 - **Multiple runtime surfaces** — Node-safe root exports, browser-safe exports,
   CLI workflow commands, and an optional HTTP/WebSocket graph server.
 
@@ -140,9 +142,14 @@ symbiote-engine inspect workflow.json --json
 - `symbiote-engine/browser` — browser-safe graph, registry, execution, contract,
   and serialization exports.
 - `symbiote-engine/cli` — workflow runner and inspection commands.
-- `symbiote-engine/contracts` — normalized resource, document, and persistence
-  contract helpers.
+- `symbiote-engine/contracts` — normalized resource, document, persistence,
+  render-provider, and audio-provider contract helpers.
+- `symbiote-engine/artifacts` — Node-only content-addressed artifact store.
+- `symbiote-engine/provider-jobs` — engine-owned provider job queue primitives
+  with model-service readiness gating.
 - `symbiote-engine/packs/*` — reusable domain packs and node handlers.
+- `symbiote-engine/providers/*` — injectable local provider implementations,
+  including browser screencast and local audio HTTP clients.
 
 ## License
 

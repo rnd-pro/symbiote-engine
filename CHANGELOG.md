@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Added audio provider contract helpers, an engine-owned provider job queue,
+  a content-addressed artifact store, and an injectable local TTS HTTP provider
+  for local audio generation pipelines.
+- Added audio-provider readiness gating, engine-owned bytes-back artifact
+  handoff for local audio services, and an injectable local Whisper/transcribe
+  HTTP provider.
+- Refactored `ai/tts` and `ai/whisper` packs to use injected audio provider
+  queues instead of serialized remote paths, SSH mode, or localhost endpoint
+  defaults.
+- Kept `browser-tts` live-only by rejecting it from executable audio providers
+  that must return cacheable `sha256:` artifacts.
+
 ## 0.3.0-alpha.12
 
 - Added `llms.txt` as a compact agent-facing resource map and included it in

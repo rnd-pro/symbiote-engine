@@ -58,6 +58,7 @@ function defaultCacheKey(inputs, params) {
  * @param {Object} [executionContext]
  * @param {AbortSignal} [executionContext.signal]
  * @param {number} [executionContext.deadline]
+ * @param {object} [executionContext.context]
  * @returns {Promise<LifecycleResult>}
  */
 export async function runLifecycle(hooks, inputs, params, cacheState, executionContext = {}) {

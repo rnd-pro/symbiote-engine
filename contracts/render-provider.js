@@ -1,5 +1,5 @@
 const RENDER_PROVIDER_KINDS = new Set(['screencast']);
-const AUDIO_PROVIDER_KINDS = new Set(['browser-tts', 'local-tts']);
+const AUDIO_PROVIDER_KINDS = new Set(['browser-tts', 'local-tts', 'local-transcribe']);
 
 function fail(path, message) {
   throw new Error(`${path}: ${message}`);

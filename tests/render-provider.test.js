@@ -159,6 +159,7 @@ test('local browser screencast provider requires injected dependencies', () => {
 test('local browser screencast provider runs with injected browser and ffmpeg', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-render-provider-'));
   let progress = [];
+  let stages = [];
   let execCalls = [];
   let closed = false;
   let page = {
@@ -210,6 +211,9 @@ test('local browser screencast provider runs with injected browser and ffmpeg', 
     timeline: [],
     captions: { enabled: false, cues: [] },
   }, {
+    onStage(event) {
+      stages.push(event.stage);
+    },
     onProgress(event) {
       progress.push(event.frame);
     },
@@ -217,6 +221,27 @@ test('local browser screencast provider runs with injected browser and ffmpeg', 
 
   assert.equal(page.url, 'http://example.test/');
   assert.deepEqual(progress, [1, 2]);
+  assert.deepEqual(stages.filter((stage) => [
+    'frames:prepare',
+    'browser:launch',
+    'browser:navigate',
+    'setup:start',
+    'capture:start',
+    'capture:done',
+    'encode:start',
+    'encode:done',
+    'screencast:done',
+  ].includes(stage)), [
+    'frames:prepare',
+    'browser:launch',
+    'browser:navigate',
+    'setup:start',
+    'capture:start',
+    'capture:done',
+    'encode:start',
+    'encode:done',
+    'screencast:done',
+  ]);
   assert.equal(execCalls.length, 1);
   assert.equal(execCalls[0].file, 'ffmpeg');
   assert.ok(execCalls[0].args.includes(join(tmp, 'out/unit.mp4')));
@@ -231,4 +256,85 @@ test('local browser screencast provider runs with injected browser and ffmpeg', 
     width: 320,
     height: 180,
   });
+});
+
+test('local browser screencast provider can call live page methods and capture state', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-render-provider-state-'));
+  let waitCalls = [];
+  let evaluateCalls = [];
+  let closed = false;
+  let page = {
+    mouse: { click: async () => {} },
+    async setViewport(viewport) {
+      this.viewport = viewport;
+    },
+    async goto(url) {
+      this.url = url;
+    },
+    async waitForFunction(_fn, _options, parts) {
+      waitCalls.push(parts);
+    },
+    async evaluate(_fn, payload) {
+      evaluateCalls.push(payload);
+      if (Object.hasOwn(payload, 'args')) return { status: 'started' };
+      return { status: 'playing', caption: { text: 'Live caption' } };
+    },
+    async screenshot(options) {
+      this.lastScreenshot = options.path;
+    },
+  };
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        return {
+          async newPage() { return page; },
+          async close() { closed = true; },
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+
+  await provider.execute({
+    id: 'state-unit',
+    output: { path: 'out/unit.mp4' },
+    surface: { url: 'http://example.test/' },
+    video: {
+      width: 320,
+      height: 180,
+      fps: 1000,
+      durationMs: 1,
+      frameCount: 1,
+    },
+    setup: [
+      { type: 'waitForWindowMethod', path: '__maximoTourRender.playProviderTour' },
+      {
+        type: 'callWindowMethod',
+        path: '__maximoTourRender.playProviderTour',
+        args: [{ cues: [{ startMs: 0, endMs: 1000, text: 'Live caption' }] }],
+      },
+    ],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+    captureState: {
+      enabled: true,
+      path: '__maximoTourRender.getState',
+      outputPath: 'out/state.json',
+      sampleEveryFrames: 1,
+    },
+  });
+
+  let state = JSON.parse(await readFile(join(tmp, 'out/state.json'), 'utf8'));
+  assert.equal(page.url, 'http://example.test/');
+  assert.deepEqual(waitCalls, [
+    ['__maximoTourRender', 'playProviderTour'],
+    ['__maximoTourRender', 'playProviderTour'],
+  ]);
+  assert.equal(evaluateCalls.length, 2);
+  assert.equal(state.samples.length, 1);
+  assert.equal(state.samples[0].state.status, 'playing');
+  assert.equal(state.samples[0].state.caption.text, 'Live caption');
+  assert.equal(closed, true);
 });

@@ -21,3 +21,15 @@ export {
   normalizeRenderJob,
   normalizeRenderProvider,
 } from './render-provider.js';
+
+export {
+  createAudioProviderNotReadyError,
+  createAudioCacheKey,
+  createAudioProviderRegistry,
+  isAudioProviderNotReadyError,
+  normalizeAudioArtifact,
+  normalizeAudioJob,
+  normalizeAudioProvider,
+  normalizeAudioProviderReadiness,
+  normalizeVoiceReference,
+} from './audio-provider.js';

@@ -11,9 +11,11 @@
     "./cli": "./cli.js",
     "./contracts": "./contracts/index.js",
     "./contracts/*": "./contracts/*",
+    "./artifacts": "./artifacts.js",
     "./FocusController.js": "./FocusController.js",
     "./Graph.js": "./Graph.js",
     "./GraphServer.js": "./GraphServer.js",
+    "./provider-jobs": "./provider-jobs.js",
     "./providers/*": "./providers/*",
     "./packs/*": "./packs/*",
     "./package.json": "./package.json"

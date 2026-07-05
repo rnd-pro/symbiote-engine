@@ -1,5 +1,5 @@
 import { execFile as nodeExecFile } from 'node:child_process';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -45,12 +45,70 @@ function validateRegexPattern(pattern, path) {
   }
 }
 
+function cleanPathParts(path, pathName) {
+  let parts = cleanString(path, '')
+    .split('.')
+    .map((part) => cleanString(part, ''))
+    .filter(Boolean);
+  if (parts.length === 0) throw new Error(`${pathName}: is required`);
+  if (parts.some((part) => !/^[a-zA-Z_$][\w$]*$/.test(part))) {
+    throw new Error(`${pathName}: must be a dotted window path`);
+  }
+  return parts;
+}
+
 async function waitForText(page, text, timeoutMs = 10000) {
   await page.waitForFunction(
     (needle) => (document.body?.innerText || '').includes(needle),
     { timeout: timeoutMs },
     text,
   );
+}
+
+async function waitForWindowMethod(page, path, timeoutMs = 10000) {
+  let parts = cleanPathParts(path, 'windowMethod.path');
+  await page.waitForFunction(
+    (methodParts) => {
+      let value = window;
+      for (let part of methodParts) value = value?.[part];
+      return typeof value === 'function';
+    },
+    { timeout: timeoutMs },
+    parts,
+  );
+}
+
+async function callWindowMethod(page, action, log) {
+  let parts = cleanPathParts(action.path, 'callWindowMethod.path');
+  log(`call window method: ${parts.join('.')}`);
+  await waitForWindowMethod(page, parts.join('.'), action.timeoutMs || 10000);
+  return page.evaluate(async ({ methodParts, args, waitForPromise }) => {
+    let owner = window;
+    for (let i = 0; i < methodParts.length - 1; i += 1) owner = owner?.[methodParts[i]];
+    let method = owner?.[methodParts[methodParts.length - 1]];
+    if (typeof method !== 'function') throw new Error(`window method not found: ${methodParts.join('.')}`);
+    let result = method.apply(owner, Array.isArray(args) ? args : []);
+    if (waitForPromise !== false && result && typeof result.then === 'function') {
+      result = await result;
+    }
+    return result ?? null;
+  }, {
+    methodParts: parts,
+    args: Array.isArray(action.args) ? action.args : [],
+    waitForPromise: action.waitForPromise !== false,
+  });
+}
+
+async function captureWindowState(page, captureState) {
+  if (!captureState?.enabled) return null;
+  let parts = cleanPathParts(captureState.path, 'captureState.path');
+  return page.evaluate(async ({ methodParts }) => {
+    let value = window;
+    for (let part of methodParts) value = value?.[part];
+    if (typeof value === 'function') value = value();
+    if (value && typeof value.then === 'function') value = await value;
+    return value ?? null;
+  }, { methodParts: parts });
 }
 
 async function clickText(page, text, { exact = false } = {}) {
@@ -130,6 +188,15 @@ async function executeAction(page, action, log) {
   if (action.type === 'waitForSelector') {
     log(`wait selector: ${action.selector}`);
     await page.waitForSelector(action.selector, { timeout: action.timeoutMs || 10000 });
+    return;
+  }
+  if (action.type === 'waitForWindowMethod') {
+    log(`wait window method: ${action.path}`);
+    await waitForWindowMethod(page, action.path, action.timeoutMs || 10000);
+    return;
+  }
+  if (action.type === 'callWindowMethod') {
+    await callWindowMethod(page, action, log);
     return;
   }
   if (action.type === 'clickText') {
@@ -239,6 +306,29 @@ function createFramesDir(root, id) {
   return join(root || join(os.tmpdir(), 'symbiote-engine-render'), `${safeId(id)}-${Date.now()}`);
 }
 
+function actionProgressLabel(action = {}) {
+  if (action.type === 'waitForText' || action.type === 'clickText' || action.type === 'clickRowText') {
+    return `${action.type}:${cleanString(action.text, '')}`;
+  }
+  if (action.type === 'waitForSelector' || action.type === 'clickSelector') {
+    return `${action.type}:${cleanString(action.selector, '')}`;
+  }
+  if (action.type === 'waitForWindowMethod' || action.type === 'callWindowMethod') {
+    return `${action.type}:${cleanString(action.path, '')}`;
+  }
+  if (action.type === 'clickRowIndex') return `${action.type}:${action.rowIndex}`;
+  if (action.type === 'waitMs') return `${action.type}:${action.durationMs}`;
+  return cleanString(action.type, 'action');
+}
+
+function emitStage(executionOptions, stage, detail = {}) {
+  if (typeof executionOptions.onStage !== 'function') return;
+  executionOptions.onStage({
+    stage,
+    ...detail,
+  });
+}
+
 export function createLocalBrowserScreencastProvider(options = {}) {
   let { puppeteer, ffmpegPath = 'ffmpeg', execFile = defaultExecFile, cwd = process.cwd(), framesRoot } = options;
   if (!puppeteer || typeof puppeteer.launch !== 'function') {
@@ -257,12 +347,27 @@ export function createLocalBrowserScreencastProvider(options = {}) {
       let output = resolvePath(cwd, executionOptions.output || job.output?.path, 'renderJob.output.path');
       let outputDir = dirname(output);
       await mkdir(outputDir, { recursive: true });
+      let captureState = job.captureState?.enabled ? {
+        ...job.captureState,
+        sampleEveryFrames: Math.max(1, Math.round(positiveNumber(job.captureState.sampleEveryFrames, 1, 'renderJob.captureState.sampleEveryFrames'))),
+      } : null;
+      let captureStateOutput = executionOptions.statePath || captureState?.outputPath || '';
+      let captureStatePath = captureStateOutput ? resolve(cwd, captureStateOutput) : '';
+      if (captureStatePath) await mkdir(dirname(captureStatePath), { recursive: true });
 
       let video = normalizeVideo(job.video);
       let framesDir = executionOptions.framesDir || createFramesDir(framesRoot, job.id);
+      emitStage(executionOptions, 'frames:prepare', {
+        framesDir,
+        frames: video.frameCount,
+        fps: video.fps,
+        width: video.width,
+        height: video.height,
+      });
       await rm(framesDir, { recursive: true, force: true });
       await mkdir(framesDir, { recursive: true });
 
+      emitStage(executionOptions, 'browser:launch', { providerId });
       let browser = await puppeteer.launch({
         headless: true,
         args: [
@@ -273,20 +378,39 @@ export function createLocalBrowserScreencastProvider(options = {}) {
       });
 
       try {
+        emitStage(executionOptions, 'browser:page');
         let page = await browser.newPage();
         await page.setViewport({
           width: video.width,
           height: video.height,
           deviceScaleFactor: 1,
         });
+        emitStage(executionOptions, 'browser:navigate', { url: job.surface.url });
         await page.goto(job.surface.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        emitStage(executionOptions, 'browser:navigated', { url: job.surface.url });
 
-        for (let action of job.setup || []) {
+        let setupActions = job.setup || [];
+        emitStage(executionOptions, 'setup:start', { actions: setupActions.length });
+        for (let index = 0; index < setupActions.length; index += 1) {
+          let action = setupActions[index];
+          emitStage(executionOptions, 'setup-action:start', {
+            index,
+            type: action.type,
+            label: actionProgressLabel(action),
+          });
           await executeAction(page, action, log);
+          emitStage(executionOptions, 'setup-action:done', {
+            index,
+            type: action.type,
+            label: actionProgressLabel(action),
+          });
         }
+        emitStage(executionOptions, 'setup:done', { actions: setupActions.length });
 
         if (job.captions?.enabled) {
+          emitStage(executionOptions, 'captions-overlay:install');
           await installCaptionOverlay(page);
+          emitStage(executionOptions, 'captions-overlay:ready');
         }
 
         let actions = [...(job.timeline || [])].sort((a, b) => a.atMs - b.atMs);
@@ -294,11 +418,31 @@ export function createLocalBrowserScreencastProvider(options = {}) {
         let lastCaptionKey = '';
         let frameIntervalMs = 1000 / video.fps;
         let startedAt = Date.now();
+        let stateSamples = [];
 
+        emitStage(executionOptions, 'capture:start', {
+          frames: video.frameCount,
+          fps: video.fps,
+          durationMs: video.durationMs,
+          timelineActions: actions.length,
+        });
         for (let frame = 0; frame < video.frameCount; frame += 1) {
           let elapsedMs = frame * frameIntervalMs;
           while (nextActionIndex < actions.length && actions[nextActionIndex].atMs <= elapsedMs) {
-            await executeAction(page, actions[nextActionIndex], log);
+            let action = actions[nextActionIndex];
+            emitStage(executionOptions, 'timeline-action:start', {
+              index: nextActionIndex,
+              atMs: action.atMs,
+              type: action.type,
+              label: actionProgressLabel(action),
+            });
+            await executeAction(page, action, log);
+            emitStage(executionOptions, 'timeline-action:done', {
+              index: nextActionIndex,
+              atMs: action.atMs,
+              type: action.type,
+              label: actionProgressLabel(action),
+            });
             nextActionIndex += 1;
           }
 
@@ -307,6 +451,14 @@ export function createLocalBrowserScreencastProvider(options = {}) {
           if (captionKey !== lastCaptionKey) {
             await setCaption(page, caption);
             lastCaptionKey = captionKey;
+          }
+
+          if (captureState && frame % captureState.sampleEveryFrames === 0) {
+            stateSamples.push({
+              frame,
+              elapsedMs: Math.round(elapsedMs),
+              state: await captureWindowState(page, captureState),
+            });
           }
 
           await page.screenshot({
@@ -320,7 +472,26 @@ export function createLocalBrowserScreencastProvider(options = {}) {
 
           await sleep(startedAt + (frame + 1) * frameIntervalMs - Date.now());
         }
+        emitStage(executionOptions, 'capture:done', { frames: video.frameCount });
 
+        if (captureStatePath) {
+          emitStage(executionOptions, 'state:write', { samples: stateSamples.length });
+          await writeFile(captureStatePath, `${JSON.stringify({
+            sourceUrl: job.surface.url,
+            providerId,
+            frames: video.frameCount,
+            fps: video.fps,
+            durationMs: video.durationMs,
+            samples: stateSamples,
+          }, null, 2)}\n`);
+          emitStage(executionOptions, 'state:written', { samples: stateSamples.length });
+        }
+
+        emitStage(executionOptions, 'encode:start', {
+          frames: video.frameCount,
+          fps: video.fps,
+          output,
+        });
         await execFile(ffmpegPath, [
           '-y',
           '-framerate', String(video.fps),
@@ -332,14 +503,17 @@ export function createLocalBrowserScreencastProvider(options = {}) {
           '-vf', `scale=${video.width}:${video.height}`,
           output,
         ], { cwd });
+        emitStage(executionOptions, 'encode:done', { output });
 
         if (!executionOptions.keepFrames) {
+          emitStage(executionOptions, 'frames:cleanup', { framesDir });
           await rm(framesDir, { recursive: true, force: true });
         } else {
           log(`Frames kept in: ${framesDir}`);
+          emitStage(executionOptions, 'frames:kept', { framesDir });
         }
 
-        return normalizeRenderArtifact({
+        let artifact = normalizeRenderArtifact({
           path: output,
           kind: 'screencast',
           providerId,
@@ -349,8 +523,12 @@ export function createLocalBrowserScreencastProvider(options = {}) {
           width: video.width,
           height: video.height,
         });
+        emitStage(executionOptions, 'screencast:done', artifact);
+        return artifact;
       } finally {
+        emitStage(executionOptions, 'browser:close');
         await browser.close().catch(() => {});
+        emitStage(executionOptions, 'browser:closed');
       }
     },
   };

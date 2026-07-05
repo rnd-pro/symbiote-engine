@@ -52,6 +52,7 @@ export class Executor {
    * @param {function} [options.onNodeCached] - Callback(nodeId, cacheHash) for lifecycle-cached
    * @param {AbortSignal} [options.signal] - Optional cancellation signal for lifecycle handlers
    * @param {number} [options.deadline] - Optional absolute deadline timestamp
+   * @param {object} [options.context] - Host-provided runtime services for lifecycle handlers
    * @returns {Promise<{outputs: object, executionOrder: string[], log: Array, totalTime: number}>}
    */
   async run(graph, options = {}) {
@@ -63,6 +64,7 @@ export class Executor {
       onNodeCached,
       signal,
       deadline,
+      context,
     } = options;
     let nodes = graph.nodes;
 
@@ -135,6 +137,7 @@ export class Executor {
         let lifecycleResult = await runLifecycle(lifecycleHooks, inputs, node.params, cacheState, {
           signal,
           deadline,
+          context,
         });
 
         if (lifecycleResult.error) {
