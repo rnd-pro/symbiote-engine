@@ -329,6 +329,14 @@ function emitStage(executionOptions, stage, detail = {}) {
   });
 }
 
+function wantsFrameSequenceArtifact(job, executionOptions = {}) {
+  let requestedKind = cleanString(
+    executionOptions.artifactKind || job.artifactKind || job.output?.kind,
+    '',
+  );
+  return executionOptions.skipEncode === true || requestedKind === 'frame-sequence';
+}
+
 export function createLocalBrowserScreencastProvider(options = {}) {
   let { puppeteer, ffmpegPath = 'ffmpeg', execFile = defaultExecFile, cwd = process.cwd(), framesRoot } = options;
   if (!puppeteer || typeof puppeteer.launch !== 'function') {
@@ -344,9 +352,12 @@ export function createLocalBrowserScreencastProvider(options = {}) {
     kind: 'screencast',
     async execute(job, executionOptions = {}) {
       let log = executionOptions.verbose ? console.log.bind(console) : () => {};
-      let output = resolvePath(cwd, executionOptions.output || job.output?.path, 'renderJob.output.path');
-      let outputDir = dirname(output);
-      await mkdir(outputDir, { recursive: true });
+      let frameSequenceArtifact = wantsFrameSequenceArtifact(job, executionOptions);
+      let output = '';
+      if (!frameSequenceArtifact || executionOptions.output) {
+        output = resolvePath(cwd, executionOptions.output || job.output?.path, 'renderJob.output.path');
+        await mkdir(dirname(output), { recursive: true });
+      }
       let captureState = job.captureState?.enabled ? {
         ...job.captureState,
         sampleEveryFrames: Math.max(1, Math.round(positiveNumber(job.captureState.sampleEveryFrames, 1, 'renderJob.captureState.sampleEveryFrames'))),
@@ -419,6 +430,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
         let frameIntervalMs = 1000 / video.fps;
         let startedAt = Date.now();
         let stateSamples = [];
+        let frameFiles = [];
 
         emitStage(executionOptions, 'capture:start', {
           frames: video.frameCount,
@@ -461,13 +473,26 @@ export function createLocalBrowserScreencastProvider(options = {}) {
             });
           }
 
+          let framePath = join(framesDir, `frame-${String(frame).padStart(5, '0')}.png`);
           await page.screenshot({
-            path: join(framesDir, `frame-${String(frame).padStart(5, '0')}.png`),
+            path: framePath,
             fullPage: false,
+          });
+          frameFiles.push({
+            index: frame,
+            path: framePath,
+            elapsedMs: Math.round(elapsedMs),
+            mimeType: 'image/png',
           });
 
           if (typeof executionOptions.onProgress === 'function') {
-            executionOptions.onProgress({ frame: frame + 1, frames: video.frameCount });
+            executionOptions.onProgress({
+              frame: frame + 1,
+              frames: video.frameCount,
+              progress: (frame + 1) / video.frameCount,
+              stage: 'capture',
+              framesDir,
+            });
           }
 
           await sleep(startedAt + (frame + 1) * frameIntervalMs - Date.now());
@@ -485,6 +510,26 @@ export function createLocalBrowserScreencastProvider(options = {}) {
             samples: stateSamples,
           }, null, 2)}\n`);
           emitStage(executionOptions, 'state:written', { samples: stateSamples.length });
+        }
+
+        if (frameSequenceArtifact) {
+          let artifact = normalizeRenderArtifact({
+            kind: 'frame-sequence',
+            providerId,
+            frames: video.frameCount,
+            fps: video.fps,
+            durationSec: video.durationMs / 1000,
+            width: video.width,
+            height: video.height,
+            framesDir,
+            framePattern: 'frame-%05d.png',
+            mimeType: 'image/png',
+            frameFiles,
+            source: { url: job.surface.url },
+            ...(output ? { path: output } : {}),
+          });
+          emitStage(executionOptions, 'frame-sequence:done', artifact);
+          return artifact;
         }
 
         emitStage(executionOptions, 'encode:start', {

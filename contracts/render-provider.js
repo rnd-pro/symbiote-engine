@@ -1,4 +1,5 @@
 const RENDER_PROVIDER_KINDS = new Set(['screencast']);
+const RENDER_ARTIFACT_KINDS = new Set(['screencast', 'frame-sequence']);
 const AUDIO_PROVIDER_KINDS = new Set(['browser-tts', 'local-tts', 'local-transcribe']);
 
 function fail(path, message) {
@@ -25,6 +26,18 @@ function positiveNumber(value, fallback, path) {
 
 function positiveInteger(value, fallback, path) {
   return Math.round(positiveNumber(value, fallback, path));
+}
+
+function optionalNonNegativeNumber(value, path) {
+  if (value === undefined || value === null || value === '') return undefined;
+  let number = Number(value);
+  if (!Number.isFinite(number) || number < 0) fail(path, 'must be a non-negative number');
+  return number;
+}
+
+function optionalNonNegativeInteger(value, path) {
+  let number = optionalNonNegativeNumber(value, path);
+  return number === undefined ? undefined : Math.round(number);
 }
 
 function normalizeKind(value, supported, fallback, path) {
@@ -70,18 +83,15 @@ export function normalizeRenderJob(job = {}) {
 
 export function normalizeRenderArtifact(result = {}, context = {}) {
   requireObject(result, 'renderArtifact');
-  let path = cleanString(result.path, '');
-  if (!path) fail('renderArtifact.path', 'is required');
   let providerId = cleanString(result.providerId, context.providerId);
   if (!providerId) fail('renderArtifact.providerId', 'is required');
   let kind = normalizeKind(
     result.kind,
-    RENDER_PROVIDER_KINDS,
+    RENDER_ARTIFACT_KINDS,
     context.kind || 'screencast',
     'renderArtifact.kind',
   );
-  return {
-    path,
+  let common = {
     kind,
     providerId,
     frames: positiveInteger(result.frames, undefined, 'renderArtifact.frames'),
@@ -89,6 +99,46 @@ export function normalizeRenderArtifact(result = {}, context = {}) {
     durationSec: positiveNumber(result.durationSec, undefined, 'renderArtifact.durationSec'),
     width: positiveInteger(result.width, undefined, 'renderArtifact.width'),
     height: positiveInteger(result.height, undefined, 'renderArtifact.height'),
+  };
+
+  if (kind === 'screencast') {
+    let path = cleanString(result.path, '');
+    if (!path) fail('renderArtifact.path', 'is required');
+    return {
+      path,
+      ...common,
+    };
+  }
+
+  let framesDir = cleanString(result.framesDir, '');
+  if (!framesDir) fail('renderArtifact.framesDir', 'is required');
+  let framePattern = cleanString(result.framePattern, 'frame-%05d.png') || 'frame-%05d.png';
+  let mimeType = cleanString(result.mimeType, 'image/png') || 'image/png';
+  let frameFiles = (Array.isArray(result.frameFiles) ? result.frameFiles : []).map((frameFile, index) => {
+    requireObject(frameFile, `renderArtifact.frameFiles[${index}]`);
+    let path = cleanString(frameFile.path, '');
+    if (!path) fail(`renderArtifact.frameFiles[${index}].path`, 'is required');
+    return {
+      index: optionalNonNegativeInteger(frameFile.index, `renderArtifact.frameFiles[${index}].index`) ?? index,
+      path,
+      elapsedMs: optionalNonNegativeNumber(frameFile.elapsedMs, `renderArtifact.frameFiles[${index}].elapsedMs`) ?? 0,
+      mimeType: cleanString(frameFile.mimeType, mimeType) || mimeType,
+    };
+  });
+  if (frameFiles.length !== common.frames) {
+    fail('renderArtifact.frameFiles', `must include ${common.frames} frame records`);
+  }
+  let path = cleanString(result.path, '');
+  let sourceUrl = cleanString(result.source?.url || result.sourceUrl, '');
+  if (!sourceUrl) fail('renderArtifact.source.url', 'is required');
+  return {
+    ...common,
+    framesDir,
+    framePattern,
+    mimeType,
+    frameFiles,
+    ...(sourceUrl ? { source: { url: sourceUrl } } : {}),
+    ...(path ? { path } : {}),
   };
 }
 

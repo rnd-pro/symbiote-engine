@@ -117,6 +117,73 @@ test('render and audio provider descriptors fail fast without fake audio executi
   );
 });
 
+test('render artifact contract supports ordered frame-sequence metadata', () => {
+  assert.deepEqual(
+    normalizeRenderArtifact({
+      kind: 'frame-sequence',
+      providerId: 'browser-headless-screencast',
+      frames: 2,
+      fps: 24,
+      durationSec: 0.5,
+      width: 640,
+      height: 360,
+      framesDir: '/tmp/frames',
+      framePattern: 'frame-%05d.png',
+      mimeType: 'image/png',
+      frameFiles: [
+        { index: 0, path: '/tmp/frames/frame-00000.png', elapsedMs: 0 },
+        { index: 1, path: '/tmp/frames/frame-00001.png', elapsedMs: 42 },
+      ],
+      source: { url: 'http://127.0.0.1:4570/?surface=media-studio' },
+    }),
+    {
+      kind: 'frame-sequence',
+      providerId: 'browser-headless-screencast',
+      frames: 2,
+      fps: 24,
+      durationSec: 0.5,
+      width: 640,
+      height: 360,
+      framesDir: '/tmp/frames',
+      framePattern: 'frame-%05d.png',
+      mimeType: 'image/png',
+      frameFiles: [
+        { index: 0, path: '/tmp/frames/frame-00000.png', elapsedMs: 0, mimeType: 'image/png' },
+        { index: 1, path: '/tmp/frames/frame-00001.png', elapsedMs: 42, mimeType: 'image/png' },
+      ],
+      source: { url: 'http://127.0.0.1:4570/?surface=media-studio' },
+    },
+  );
+  assert.throws(
+    () => normalizeRenderArtifact({
+      kind: 'frame-sequence',
+      providerId: 'p',
+      frames: 2,
+      fps: 24,
+      durationSec: 0.5,
+      width: 640,
+      height: 360,
+      framesDir: '/tmp/frames',
+      frameFiles: [{ path: '/tmp/frames/frame-00000.png' }],
+    }),
+    /renderArtifact\.frameFiles: must include 2 frame records/,
+  );
+  assert.throws(
+    () => normalizeRenderArtifact({
+      kind: 'frame-sequence',
+      providerId: 'p',
+      frames: 1,
+      fps: 24,
+      durationSec: 0.5,
+      width: 640,
+      height: 360,
+      framesDir: '/tmp/frames',
+      frameFiles: [{ path: '/tmp/frames/frame-00000.png' }],
+    }),
+    /renderArtifact\.source\.url: is required/,
+  );
+});
+
 test('render provider contract stays browser-safe while local provider stays Node-only', async () => {
   let contractsDir = new URL('../contracts/', import.meta.url);
   for (let file of await readdir(contractsDir)) {
@@ -256,6 +323,90 @@ test('local browser screencast provider runs with injected browser and ffmpeg', 
     width: 320,
     height: 180,
   });
+});
+
+test('local browser screencast provider can return a frame-sequence artifact without ffmpeg', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-frame-sequence-'));
+  let progress = [];
+  let stages = [];
+  let execCalls = [];
+  let screenshotPaths = [];
+  let closed = false;
+  let page = {
+    mouse: { click: async () => {} },
+    async setViewport(viewport) {
+      this.viewport = viewport;
+    },
+    async goto(url) {
+      this.url = url;
+    },
+    async screenshot(options) {
+      screenshotPaths.push(options.path);
+    },
+  };
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        return {
+          async newPage() { return page; },
+          async close() { closed = true; },
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async (...args) => {
+      execCalls.push(args);
+    },
+  });
+
+  let result = await provider.execute({
+    id: 'sequence-unit',
+    output: { path: 'out/ignored-sequence.mp4' },
+    surface: { url: 'http://example.test/media' },
+    video: {
+      width: 320,
+      height: 180,
+      fps: 1000,
+      durationMs: 2,
+      frameCount: 2,
+    },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+  }, {
+    artifactKind: 'frame-sequence',
+    onStage(event) {
+      stages.push(event.stage);
+    },
+    onProgress(event) {
+      progress.push(event);
+    },
+  });
+
+  assert.equal(page.url, 'http://example.test/media');
+  assert.equal(execCalls.length, 0);
+  assert.equal(closed, true);
+  assert.equal(result.kind, 'frame-sequence');
+  assert.equal(result.providerId, 'browser-headless-screencast');
+  assert.equal(result.frames, 2);
+  assert.equal(result.path, undefined);
+  assert.equal(result.framePattern, 'frame-%05d.png');
+  assert.equal(result.mimeType, 'image/png');
+  assert.equal(result.source.url, 'http://example.test/media');
+  assert.deepEqual(
+    result.frameFiles.map((frame) => [frame.index, frame.path, frame.elapsedMs, frame.mimeType]),
+    [
+      [0, screenshotPaths[0], 0, 'image/png'],
+      [1, screenshotPaths[1], 1, 'image/png'],
+    ],
+  );
+  assert.deepEqual(progress.map((event) => [event.frame, event.frames, event.progress, event.stage]), [
+    [1, 2, 0.5, 'capture'],
+    [2, 2, 1, 'capture'],
+  ]);
+  assert.ok(stages.includes('frame-sequence:done'));
+  assert.equal(stages.includes('encode:start'), false);
 });
 
 test('local browser screencast provider can call live page methods and capture state', async () => {
