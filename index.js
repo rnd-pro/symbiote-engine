@@ -76,5 +76,11 @@ export {
 export { createLocalBrowserScreencastProvider } from './providers/local-browser-screencast.js';
 export { createFileArtifactStore } from './artifacts.js';
 export { createAudioProviderJobQueue } from './provider-jobs.js';
+export {
+  createMemoryFrameCacheStore,
+  createRenderFrameCacheKey,
+  createRenderRetentionCleanup,
+} from './render-cache.js';
+export { createRenderJobCacheKey, createRenderProviderJobQueue } from './render-jobs.js';
 export { createLocalAudioTtsProvider } from './providers/local-audio-tts.js';
 export { createLocalAudioTranscribeProvider } from './providers/local-audio-transcribe.js';

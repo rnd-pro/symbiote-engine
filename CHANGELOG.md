@@ -8,6 +8,8 @@
 - Added audio-provider readiness gating, engine-owned bytes-back artifact
   handoff for local audio services, and an injectable local Whisper/transcribe
   HTTP provider.
+- Added render provider job queue and render cache helpers for provider-backed
+  screencast jobs, deterministic frame cache keys, and retention cleanup.
 - Refactored `ai/tts` and `ai/whisper` packs to use injected audio provider
   queues instead of serialized remote paths, SSH mode, or localhost endpoint
   defaults.

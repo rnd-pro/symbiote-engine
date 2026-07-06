@@ -8,8 +8,57 @@ import { normalizeRenderArtifact } from '../contracts/render-provider.js';
 
 const defaultExecFile = promisify(nodeExecFile);
 
-function sleep(ms) {
-  return new Promise((resolveSleep) => setTimeout(resolveSleep, Math.max(0, ms)));
+function abortError(signal) {
+  let reason = signal?.reason;
+  if (reason instanceof Error) return reason;
+  let error = new Error(cleanString(reason, 'operation aborted') || 'operation aborted');
+  error.name = 'AbortError';
+  error.code = 'ABORT_ERR';
+  return error;
+}
+
+function assertNotAborted(signal) {
+  if (signal?.aborted) throw abortError(signal);
+}
+
+function sleep(ms, signal) {
+  assertNotAborted(signal);
+  return new Promise((resolveSleep, rejectSleep) => {
+    let timer = setTimeout(done, Math.max(0, ms));
+    function cleanup() {
+      clearTimeout(timer);
+      signal?.removeEventListener?.('abort', onAbort);
+    }
+    function done() {
+      cleanup();
+      resolveSleep();
+    }
+    function onAbort() {
+      cleanup();
+      rejectSleep(abortError(signal));
+    }
+    signal?.addEventListener?.('abort', onAbort, { once: true });
+  });
+}
+
+function withAbort(promise, signal) {
+  assertNotAborted(signal);
+  if (!signal) return promise;
+  let settled = false;
+  let wrapped = Promise.resolve(promise);
+  let aborted = new Promise((_, reject) => {
+    function onAbort() {
+      if (settled) return;
+      reject(abortError(signal));
+    }
+    signal.addEventListener('abort', onAbort, { once: true });
+    wrapped.finally(() => {
+      settled = true;
+      signal.removeEventListener('abort', onAbort);
+    }).catch(() => {});
+  });
+  wrapped.catch(() => {});
+  return Promise.race([wrapped, aborted]);
 }
 
 function cleanString(value, fallback = '') {
@@ -72,6 +121,23 @@ async function waitForWindowMethod(page, path, timeoutMs = 10000) {
       let value = window;
       for (let part of methodParts) value = value?.[part];
       return typeof value === 'function';
+    },
+    { timeout: timeoutMs },
+    parts,
+  );
+}
+
+async function waitForWindowPredicate(page, path, timeoutMs = 10000) {
+  let parts = cleanPathParts(path, 'windowPredicate.path');
+  await page.waitForFunction(
+    (predicateParts) => {
+      let owner = window;
+      for (let i = 0; i < predicateParts.length - 1; i += 1) owner = owner?.[predicateParts[i]];
+      let value = owner?.[predicateParts[predicateParts.length - 1]];
+      if (typeof value === 'function') {
+        try { return Boolean(value.call(owner)); } catch { return false; }
+      }
+      return Boolean(value);
     },
     { timeout: timeoutMs },
     parts,
@@ -195,6 +261,11 @@ async function executeAction(page, action, log) {
     await waitForWindowMethod(page, action.path, action.timeoutMs || 10000);
     return;
   }
+  if (action.type === 'waitForWindowPredicate') {
+    log(`wait window predicate: ${action.path}`);
+    await waitForWindowPredicate(page, action.path, action.timeoutMs || 10000);
+    return;
+  }
   if (action.type === 'callWindowMethod') {
     await callWindowMethod(page, action, log);
     return;
@@ -313,7 +384,7 @@ function actionProgressLabel(action = {}) {
   if (action.type === 'waitForSelector' || action.type === 'clickSelector') {
     return `${action.type}:${cleanString(action.selector, '')}`;
   }
-  if (action.type === 'waitForWindowMethod' || action.type === 'callWindowMethod') {
+  if (action.type === 'waitForWindowMethod' || action.type === 'waitForWindowPredicate' || action.type === 'callWindowMethod') {
     return `${action.type}:${cleanString(action.path, '')}`;
   }
   if (action.type === 'clickRowIndex') return `${action.type}:${action.rowIndex}`;
@@ -351,8 +422,10 @@ export function createLocalBrowserScreencastProvider(options = {}) {
     id: providerId,
     kind: 'screencast',
     async execute(job, executionOptions = {}) {
+      let signal = executionOptions.signal;
       let log = executionOptions.verbose ? console.log.bind(console) : () => {};
       let frameSequenceArtifact = wantsFrameSequenceArtifact(job, executionOptions);
+      assertNotAborted(signal);
       let output = '';
       if (!frameSequenceArtifact || executionOptions.output) {
         output = resolvePath(cwd, executionOptions.output || job.output?.path, 'renderJob.output.path');
@@ -379,6 +452,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
       await mkdir(framesDir, { recursive: true });
 
       emitStage(executionOptions, 'browser:launch', { providerId });
+      assertNotAborted(signal);
       let browser = await puppeteer.launch({
         headless: true,
         args: [
@@ -390,14 +464,14 @@ export function createLocalBrowserScreencastProvider(options = {}) {
 
       try {
         emitStage(executionOptions, 'browser:page');
-        let page = await browser.newPage();
-        await page.setViewport({
+        let page = await withAbort(browser.newPage(), signal);
+        await withAbort(page.setViewport({
           width: video.width,
           height: video.height,
           deviceScaleFactor: 1,
-        });
+        }), signal);
         emitStage(executionOptions, 'browser:navigate', { url: job.surface.url });
-        await page.goto(job.surface.url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await withAbort(page.goto(job.surface.url, { waitUntil: 'domcontentloaded', timeout: 30000 }), signal);
         emitStage(executionOptions, 'browser:navigated', { url: job.surface.url });
 
         let setupActions = job.setup || [];
@@ -409,7 +483,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
             type: action.type,
             label: actionProgressLabel(action),
           });
-          await executeAction(page, action, log);
+          await withAbort(executeAction(page, action, log), signal);
           emitStage(executionOptions, 'setup-action:done', {
             index,
             type: action.type,
@@ -439,6 +513,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
           timelineActions: actions.length,
         });
         for (let frame = 0; frame < video.frameCount; frame += 1) {
+          assertNotAborted(signal);
           let elapsedMs = frame * frameIntervalMs;
           while (nextActionIndex < actions.length && actions[nextActionIndex].atMs <= elapsedMs) {
             let action = actions[nextActionIndex];
@@ -448,7 +523,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
               type: action.type,
               label: actionProgressLabel(action),
             });
-            await executeAction(page, action, log);
+            await withAbort(executeAction(page, action, log), signal);
             emitStage(executionOptions, 'timeline-action:done', {
               index: nextActionIndex,
               atMs: action.atMs,
@@ -461,7 +536,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
           let caption = captionAt(job.captions, elapsedMs);
           let captionKey = caption ? `${caption.speaker}:${caption.text}` : '';
           if (captionKey !== lastCaptionKey) {
-            await setCaption(page, caption);
+            await withAbort(setCaption(page, caption), signal);
             lastCaptionKey = captionKey;
           }
 
@@ -469,15 +544,15 @@ export function createLocalBrowserScreencastProvider(options = {}) {
             stateSamples.push({
               frame,
               elapsedMs: Math.round(elapsedMs),
-              state: await captureWindowState(page, captureState),
+              state: await withAbort(captureWindowState(page, captureState), signal),
             });
           }
 
           let framePath = join(framesDir, `frame-${String(frame).padStart(5, '0')}.png`);
-          await page.screenshot({
+          await withAbort(page.screenshot({
             path: framePath,
             fullPage: false,
-          });
+          }), signal);
           frameFiles.push({
             index: frame,
             path: framePath,
@@ -495,24 +570,26 @@ export function createLocalBrowserScreencastProvider(options = {}) {
             });
           }
 
-          await sleep(startedAt + (frame + 1) * frameIntervalMs - Date.now());
+          await sleep(startedAt + (frame + 1) * frameIntervalMs - Date.now(), signal);
         }
         emitStage(executionOptions, 'capture:done', { frames: video.frameCount });
 
         if (captureStatePath) {
+          assertNotAborted(signal);
           emitStage(executionOptions, 'state:write', { samples: stateSamples.length });
-          await writeFile(captureStatePath, `${JSON.stringify({
+          await withAbort(writeFile(captureStatePath, `${JSON.stringify({
             sourceUrl: job.surface.url,
             providerId,
             frames: video.frameCount,
             fps: video.fps,
             durationMs: video.durationMs,
             samples: stateSamples,
-          }, null, 2)}\n`);
+          }, null, 2)}\n`), signal);
           emitStage(executionOptions, 'state:written', { samples: stateSamples.length });
         }
 
         if (frameSequenceArtifact) {
+          assertNotAborted(signal);
           let artifact = normalizeRenderArtifact({
             kind: 'frame-sequence',
             providerId,
@@ -532,12 +609,13 @@ export function createLocalBrowserScreencastProvider(options = {}) {
           return artifact;
         }
 
+        assertNotAborted(signal);
         emitStage(executionOptions, 'encode:start', {
           frames: video.frameCount,
           fps: video.fps,
           output,
         });
-        await execFile(ffmpegPath, [
+        await withAbort(execFile(ffmpegPath, [
           '-y',
           '-framerate', String(video.fps),
           '-i', join(framesDir, 'frame-%05d.png'),
@@ -547,7 +625,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
           '-pix_fmt', 'yuv420p',
           '-vf', `scale=${video.width}:${video.height}`,
           output,
-        ], { cwd });
+        ], { cwd }), signal);
         emitStage(executionOptions, 'encode:done', { output });
 
         if (!executionOptions.keepFrames) {

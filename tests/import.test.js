@@ -14,6 +14,8 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.normalizeSourceDocument, 'function');
   assert.equal(typeof engine.normalizeRenderArtifact, 'function');
   assert.equal(typeof engine.createPersistenceAdapter, 'function');
+  assert.equal(typeof engine.createRenderFrameCacheKey, 'function');
+  assert.equal(typeof engine.createRenderRetentionCleanup, 'function');
 });
 
 test('graph can be constructed without browser runtime', async () => {
@@ -31,6 +33,14 @@ test('contracts entrypoint imports in Node', async () => {
   assert.equal(typeof contracts.createMemoryPersistenceAdapter, 'function');
 });
 
+test('render cache subpath imports in Node', async () => {
+  let renderCache = await import('symbiote-engine/render-cache');
+
+  assert.equal(typeof renderCache.createRenderFrameCacheKey, 'function');
+  assert.equal(typeof renderCache.createMemoryFrameCacheStore, 'function');
+  assert.equal(typeof renderCache.createRenderRetentionCleanup, 'function');
+});
+
 test('browser engine API excludes Node-only runtime modules', async () => {
   let engine = await import('../browser.js');
 
@@ -44,6 +54,7 @@ test('browser engine API excludes Node-only runtime modules', async () => {
   assert.equal(engine.loadHandlers, undefined);
   assert.equal(engine.createServer, undefined);
   assert.equal(engine.createLocalBrowserScreencastProvider, undefined);
+  assert.equal(engine.createRenderRetentionCleanup, undefined);
   assert.equal(typeof engine.createRenderProviderRegistry, 'function');
 });
 

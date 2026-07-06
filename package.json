@@ -16,6 +16,8 @@
     "./Graph.js": "./Graph.js",
     "./GraphServer.js": "./GraphServer.js",
     "./provider-jobs": "./provider-jobs.js",
+    "./render-cache": "./render-cache.js",
+    "./render-jobs": "./render-jobs.js",
     "./providers/*": "./providers/*",
     "./packs/*": "./packs/*",
     "./package.json": "./package.json"

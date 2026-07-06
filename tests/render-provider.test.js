@@ -409,6 +409,70 @@ test('local browser screencast provider can return a frame-sequence artifact wit
   assert.equal(stages.includes('encode:start'), false);
 });
 
+test('local browser screencast provider aborts capture and closes browser', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-render-abort-'));
+  let controller = new AbortController();
+  let progress = [];
+  let execCalls = [];
+  let closed = false;
+  let page = {
+    mouse: { click: async () => {} },
+    async setViewport(viewport) {
+      this.viewport = viewport;
+    },
+    async goto(url) {
+      this.url = url;
+    },
+    async screenshot(options) {
+      this.lastScreenshot = options.path;
+    },
+  };
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        return {
+          async newPage() { return page; },
+          async close() { closed = true; },
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async (...args) => {
+      execCalls.push(args);
+    },
+  });
+
+  await assert.rejects(
+    () => provider.execute({
+      id: 'abort-unit',
+      output: { path: 'out/abort.mp4' },
+      surface: { url: 'http://example.test/abort' },
+      video: {
+        width: 320,
+        height: 180,
+        fps: 1000,
+        durationMs: 3,
+        frameCount: 3,
+      },
+      setup: [],
+      timeline: [],
+      captions: { enabled: false, cues: [] },
+    }, {
+      signal: controller.signal,
+      onProgress(event) {
+        progress.push(event.frame);
+        if (event.frame === 1) controller.abort('render cancel smoke');
+      },
+    }),
+    /render cancel smoke/,
+  );
+
+  assert.equal(closed, true);
+  assert.deepEqual(progress, [1]);
+  assert.equal(execCalls.length, 0);
+});
+
 test('local browser screencast provider can call live page methods and capture state', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-render-provider-state-'));
   let waitCalls = [];
@@ -460,6 +524,7 @@ test('local browser screencast provider can call live page methods and capture s
       frameCount: 1,
     },
     setup: [
+      { type: 'waitForWindowPredicate', path: '__maximoTourRender.ready' },
       { type: 'waitForWindowMethod', path: '__maximoTourRender.playProviderTour' },
       {
         type: 'callWindowMethod',
@@ -480,6 +545,7 @@ test('local browser screencast provider can call live page methods and capture s
   let state = JSON.parse(await readFile(join(tmp, 'out/state.json'), 'utf8'));
   assert.equal(page.url, 'http://example.test/');
   assert.deepEqual(waitCalls, [
+    ['__maximoTourRender', 'ready'],
     ['__maximoTourRender', 'playProviderTour'],
     ['__maximoTourRender', 'playProviderTour'],
   ]);

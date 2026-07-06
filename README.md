@@ -147,6 +147,10 @@ symbiote-engine inspect workflow.json --json
 - `symbiote-engine/artifacts` — Node-only content-addressed artifact store.
 - `symbiote-engine/provider-jobs` — engine-owned provider job queue primitives
   with model-service readiness gating.
+- `symbiote-engine/render-cache` — Node-only frame cache keys, in-memory frame
+  cache store, and render retention cleanup helpers.
+- `symbiote-engine/render-jobs` — engine-owned render provider job queue
+  primitives with progress, timeout, cancel, cache-hit, and cleanup events.
 - `symbiote-engine/packs/*` — reusable domain packs and node handlers.
 - `symbiote-engine/providers/*` — injectable local provider implementations,
   including browser screencast and local audio HTTP clients.
