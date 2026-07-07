@@ -149,8 +149,9 @@ symbiote-engine inspect workflow.json --json
   with model-service readiness gating.
 - `symbiote-engine/render-cache` — Node-only frame cache keys, in-memory frame
   cache store, and render retention cleanup helpers.
-- `symbiote-engine/render-finalize` — frame-sequence encode args, audio mux
-  args, ffprobe JSON parsing, and neutral proof manifest projection helpers.
+- `symbiote-engine/render-finalize` — frame-sequence encode args, audio
+  concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest
+  projection helpers.
 - `symbiote-engine/render-proof` — ffprobe stream normalization,
   audio/speaker layer proof, and A/V sync proof helpers for provider-backed
   render pipelines.

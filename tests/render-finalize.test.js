@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  buildAudioConcatArgs,
+  buildAudioConcatListLine,
   buildAudioMuxArgs,
+  buildAudioOverlapMixArgs,
   buildFrameSequenceEncodeArgs,
   buildRenderProofManifestProjection,
   parseFfprobeJson,
@@ -55,6 +58,56 @@ test('render finalize builds frame sequence x264 args with optional audio', () =
       'silent.mp4',
     ],
   );
+});
+
+test('render finalize builds concat demuxer audio args and list lines', () => {
+  assert.equal(buildAudioConcatListLine("/cache/audio/guide's line.wav"), "file '/cache/audio/guide'\\''s line.wav'");
+  assert.deepEqual(
+    buildAudioConcatArgs({
+      concatListPath: '/cache/audio/concat.txt',
+      outputPath: '/cache/audio/narration.wav',
+    }),
+    [
+      '-y',
+      '-f', 'concat',
+      '-safe', '0',
+      '-i', '/cache/audio/concat.txt',
+      '-c:a', 'pcm_s16le',
+      '/cache/audio/narration.wav',
+    ],
+  );
+});
+
+test('render finalize builds overlap mix audio args without changing timing math', () => {
+  assert.equal(buildAudioOverlapMixArgs({ clips: [], outputPath: 'out.wav' }), null);
+
+  let mix = buildAudioOverlapMixArgs({
+    clips: [
+      { path: 'guide.wav', startMs: 0, endMs: 1200 },
+      { path: 'ops.wav', startMs: 500, endMs: 1900 },
+      { path: 'dispatch.wav', startMs: 1750.4, endMs: 2600 },
+    ],
+    outputPath: 'narration.wav',
+  });
+
+  assert.equal(mix.durationMs, 2600);
+  assert.equal(mix.durationSec, 2.6);
+  assert.equal(mix.filterComplex, [
+    '[0:a]adelay=0|0,apad,atrim=0:2.600[a0]',
+    '[1:a]adelay=500|500,apad,atrim=0:2.600[a1]',
+    '[2:a]adelay=1750|1750,apad,atrim=0:2.600[a2]',
+    '[a0][a1][a2]amix=inputs=3:duration=longest:normalize=0,atrim=0:2.600[mix]',
+  ].join(';'));
+  assert.deepEqual(mix.args, [
+    '-y',
+    '-i', 'guide.wav',
+    '-i', 'ops.wav',
+    '-i', 'dispatch.wav',
+    '-filter_complex', mix.filterComplex,
+    '-map', '[mix]',
+    '-c:a', 'pcm_s16le',
+    'narration.wav',
+  ]);
 });
 
 test('render finalize builds reusable audio mux args from a caller-owned filter graph', () => {

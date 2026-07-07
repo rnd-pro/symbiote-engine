@@ -18,7 +18,8 @@
 - Added `render-captions` helpers for reusable Whisper caption cue attribution
   and VTT generation in provider-backed render pipelines.
 - Added `render-finalize` helpers for reusable frame-sequence encode args,
-  audio mux args, ffprobe JSON parsing, and neutral proof manifest projection.
+  audio concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest
+  projection.
 - Added `render-proof` helpers for reusable ffprobe stream normalization,
   audio/speaker layer proof, and A/V sync proof in provider-backed render
   pipelines.

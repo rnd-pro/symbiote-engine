@@ -97,7 +97,10 @@ export {
   renderVtt,
 } from './render-captions.js';
 export {
+  buildAudioConcatArgs,
+  buildAudioConcatListLine,
   buildAudioMuxArgs,
+  buildAudioOverlapMixArgs,
   buildFrameSequenceEncodeArgs,
   buildRenderProofManifestProjection,
   parseFfprobeJson,
