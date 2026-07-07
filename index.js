@@ -106,6 +106,7 @@ export {
   parseFfprobeJson,
 } from './render-finalize.js';
 export {
+  buildRenderQueueSnapshot,
   buildTerminalRenderJobPatch,
   classifyRenderError,
   isRenderTimeout,

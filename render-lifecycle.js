@@ -116,6 +116,40 @@ export function buildTerminalRenderJobPatch(errorOrRecord = {}, jobContext = {})
   };
 }
 
+export function buildRenderQueueSnapshot(record = {}, submitted = {}, options = {}) {
+  let sanitizeMessage = typeof options.sanitizeMessage === 'function'
+    ? options.sanitizeMessage
+    : (value, fallback = '') => cleanString(value, fallback);
+  let timeoutFallback = cleanString(options.timeoutFallback, 'render job timed out');
+  let failureFallback = cleanString(options.failureFallback, 'render queue failed');
+  let timeout = isRenderTimeout(record);
+  let classification = classifyRenderError(record);
+  let error = record?.error
+    ? {
+      message: sanitizeMessage(record.error?.message, String(record.error || failureFallback)),
+      code: cleanString(record.error?.code, ''),
+    }
+    : null;
+  let snapshot = {
+    jobId: cleanString(record?.jobId || submitted?.jobId, ''),
+    status: cleanString(record?.status || submitted?.status, ''),
+    stage: cleanString(record?.stage, ''),
+    cacheHit: record?.cacheHit === true,
+    timeout,
+    timeoutReason: timeout
+      ? sanitizeMessage(cleanString(classification.detail, timeoutFallback), timeoutFallback)
+      : '',
+    cancelReason: sanitizeMessage(record?.cancelReason, ''),
+    cleanup: record?.cleanup || null,
+    error,
+  };
+  if (options.includeKindProvider === true) {
+    snapshot.kind = cleanString(record?.kind || submitted?.kind, '');
+    snapshot.providerId = cleanString(record?.providerId || submitted?.providerId, '');
+  }
+  return snapshot;
+}
+
 export function mapRenderEventToProgress(event = {}, options = {}) {
   let stage = eventStage(event);
   let currentProgress = clampProgress(options.currentProgress, 0);

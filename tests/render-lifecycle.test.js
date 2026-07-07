@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  buildRenderQueueSnapshot,
   buildTerminalRenderJobPatch,
   classifyRenderError,
   isRenderTimeout,
@@ -133,4 +134,122 @@ test('render lifecycle leaves terminal patch strings raw for host redaction', ()
     status: 'failed',
     error: raw,
   });
+});
+
+test('render lifecycle builds neutral queue snapshots with default sanitization', () => {
+  assert.deepEqual(buildRenderQueueSnapshot({
+    jobId: 'render-1',
+    status: 'failed',
+    stage: 'capture:frame',
+    cacheHit: 'yes',
+    cancelReason: 'operator canceled',
+    cleanup: { removed: [{ path: 'frames' }] },
+    error: { message: 'provider failed', code: 'E_PROVIDER' },
+  }, { jobId: 'submitted-1' }), {
+    jobId: 'render-1',
+    status: 'failed',
+    stage: 'capture:frame',
+    cacheHit: false,
+    timeout: false,
+    timeoutReason: '',
+    cancelReason: 'operator canceled',
+    cleanup: { removed: [{ path: 'frames' }] },
+    error: { message: 'provider failed', code: 'E_PROVIDER' },
+  });
+  assert.deepEqual(buildRenderQueueSnapshot({}, { jobId: 'submitted-1', status: 'queued' }), {
+    jobId: 'submitted-1',
+    status: 'queued',
+    stage: '',
+    cacheHit: false,
+    timeout: false,
+    timeoutReason: '',
+    cancelReason: '',
+    cleanup: null,
+    error: null,
+  });
+});
+
+test('render lifecycle can include audio queue kind and provider fields', () => {
+  assert.deepEqual(buildRenderQueueSnapshot({
+    jobId: 'audio-1',
+    status: 'succeeded',
+    stage: 'done',
+    kind: 'tts',
+    providerId: 'local-audio',
+    cacheHit: true,
+  }, {}, { includeKindProvider: true }), {
+    jobId: 'audio-1',
+    status: 'succeeded',
+    stage: 'done',
+    cacheHit: true,
+    timeout: false,
+    timeoutReason: '',
+    cancelReason: '',
+    cleanup: null,
+    error: null,
+    kind: 'tts',
+    providerId: 'local-audio',
+  });
+  assert.equal('kind' in buildRenderQueueSnapshot({ kind: 'tts' }), false);
+  assert.equal('providerId' in buildRenderQueueSnapshot({ providerId: 'local-audio' }), false);
+});
+
+test('render lifecycle queue snapshots preserve error and timeout fallback semantics', () => {
+  assert.deepEqual(buildRenderQueueSnapshot({
+    jobId: 'render-timeout',
+    status: 'failed',
+    error: { code: 'TIMEOUT', message: 'browser waited too long' },
+  }, {}, { timeoutFallback: 'render job timed out' }), {
+    jobId: 'render-timeout',
+    status: 'failed',
+    stage: '',
+    cacheHit: false,
+    timeout: true,
+    timeoutReason: 'browser waited too long',
+    cancelReason: '',
+    cleanup: null,
+    error: { message: 'browser waited too long', code: 'TIMEOUT' },
+  });
+  assert.equal(buildRenderQueueSnapshot({
+    status: 'timeout',
+  }, {}, { timeoutFallback: 'audio job timed out' }).timeoutReason, 'audio job timed out');
+  assert.deepEqual(buildRenderQueueSnapshot({
+    status: 'failed',
+    error: 'plain string failure',
+  }, {}, { failureFallback: 'render queue failed' }).error, {
+    message: 'plain string failure',
+    code: '',
+  });
+});
+
+test('render lifecycle queue snapshots route only free-text fields through sanitizer', () => {
+  let calls = [];
+  let snapshot = buildRenderQueueSnapshot({
+    jobId: 'render-raw',
+    status: 'timeout',
+    stage: 'failed',
+    cancelReason: 'operator canceled',
+    error: { code: 'TIMEOUT', message: 'waited too long' },
+  }, {}, {
+    sanitizeMessage(value, fallback = '') {
+      calls.push({ value, fallback });
+      return `safe:${String(value ?? fallback)}`;
+    },
+  });
+  assert.deepEqual(snapshot, {
+    jobId: 'render-raw',
+    status: 'timeout',
+    stage: 'failed',
+    cacheHit: false,
+    timeout: true,
+    timeoutReason: 'safe:waited too long',
+    cancelReason: 'safe:operator canceled',
+    cleanup: null,
+    error: { message: 'safe:waited too long', code: 'TIMEOUT' },
+  });
+  assert.deepEqual(calls, [
+    { value: 'waited too long', fallback: '[object Object]' },
+    { value: 'waited too long', fallback: 'render job timed out' },
+    { value: 'operator canceled', fallback: '' },
+  ]);
 });

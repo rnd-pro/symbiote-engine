@@ -18,7 +18,7 @@ symbiote-engine runs graph-driven automation without coupling execution logic to
 - [`symbiote-engine/contracts`](https://github.com/rnd-pro/symbiote-engine/tree/main/contracts): normalized source documents, resource trees, and persistence adapters for editor and agent surfaces
 - [`symbiote-engine/render-cache`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-cache.js): Node-only frame cache keys, memory frame cache store, and render retention cleanup helpers
 - [`symbiote-engine/render-finalize`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-finalize.js): frame-sequence encode args, audio concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest projection helpers
-- [`symbiote-engine/render-lifecycle`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-lifecycle.js): render event progress mapping, terminal job patches, and stable render error taxonomy helpers
+- [`symbiote-engine/render-lifecycle`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-lifecycle.js): render event progress mapping, terminal job patches, queue snapshots, and stable render error taxonomy helpers
 - [`symbiote-engine/render-proof`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-proof.js): ffprobe stream normalization, audio/speaker layer proof, and A/V sync proof helpers for provider-backed render pipelines
 - [`symbiote-engine/render-jobs`](https://github.com/rnd-pro/symbiote-engine/blob/main/render-jobs.js): engine-owned render provider job queue with progress, timeout, cancel, cache-hit, and cleanup events
 - [`symbiote-engine/packs/*`](https://github.com/rnd-pro/symbiote-engine/tree/main/packs): reusable domain node packs and hot-loadable handlers

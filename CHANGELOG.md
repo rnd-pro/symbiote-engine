@@ -21,7 +21,7 @@
   audio concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest
   projection.
 - Added `render-lifecycle` helpers for reusable render event progress mapping,
-  terminal job patches, and stable render error taxonomy.
+  terminal job patches, queue snapshots, and stable render error taxonomy.
 - Added `render-proof` helpers for reusable ffprobe stream normalization,
   audio/speaker layer proof, and A/V sync proof in provider-backed render
   pipelines.

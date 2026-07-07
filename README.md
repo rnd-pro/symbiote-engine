@@ -153,7 +153,7 @@ symbiote-engine inspect workflow.json --json
   concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest
   projection helpers.
 - `symbiote-engine/render-lifecycle` — render event progress mapping, terminal
-  job patches, and stable render error taxonomy helpers.
+  job patches, queue snapshots, and stable render error taxonomy helpers.
 - `symbiote-engine/render-proof` — ffprobe stream normalization,
   audio/speaker layer proof, and A/V sync proof helpers for provider-backed
   render pipelines.
