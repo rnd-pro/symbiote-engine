@@ -392,6 +392,17 @@ function createFramesDir(root, id) {
   return join(root || join(os.tmpdir(), 'symbiote-engine-render'), `${safeId(id)}-${Date.now()}`);
 }
 
+function createBrowserProfileDir(root, id) {
+  return join(root || join(os.tmpdir(), 'symbiote-engine-browser'), `${safeId(id)}-${Date.now()}`);
+}
+
+function appendCleanupPath(job, key, path) {
+  if (!path) return;
+  if (!job.cleanup || typeof job.cleanup !== 'object' || Array.isArray(job.cleanup)) job.cleanup = {};
+  let list = Array.isArray(job.cleanup[key]) ? job.cleanup[key] : [];
+  if (!list.includes(path)) job.cleanup[key] = [...list, path];
+}
+
 function actionProgressLabel(action = {}) {
   if (action.type === 'waitForText' || action.type === 'clickText' || action.type === 'clickRowText') {
     return `${action.type}:${cleanString(action.text, '')}`;
@@ -456,6 +467,10 @@ export function createLocalBrowserScreencastProvider(options = {}) {
 
       let video = normalizeVideo(job.video);
       let framesDir = executionOptions.framesDir || createFramesDir(framesRoot, job.id);
+      let browserProfileDir = executionOptions.browserProfileDir
+        || job.execution?.browserProfileDir
+        || createBrowserProfileDir(executionOptions.browserProfileRoot || job.execution?.browserProfileRoot, job.id);
+      appendCleanupPath(job, 'browserProfilePaths', browserProfileDir);
       emitStage(executionOptions, 'frames:prepare', {
         framesDir,
         frames: video.frameCount,
@@ -465,11 +480,14 @@ export function createLocalBrowserScreencastProvider(options = {}) {
       });
       await rm(framesDir, { recursive: true, force: true });
       await mkdir(framesDir, { recursive: true });
+      await rm(browserProfileDir, { recursive: true, force: true });
+      await mkdir(browserProfileDir, { recursive: true });
 
       emitStage(executionOptions, 'browser:launch', { providerId });
       assertNotAborted(signal);
       let browser = await puppeteer.launch({
         headless: true,
+        userDataDir: browserProfileDir,
         args: [
           `--window-size=${video.width},${video.height}`,
           '--no-sandbox',

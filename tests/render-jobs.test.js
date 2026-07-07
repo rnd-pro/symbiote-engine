@@ -25,7 +25,8 @@ test('render provider job queue runs a job and records progress events', async (
     {
       id: 'browser-headless-screencast',
       kind: 'screencast',
-      execute: async (_job, context = {}) => {
+      execute: async (job, context = {}) => {
+        job.cleanup.browserProfilePaths = ['/tmp/browser-profile'];
         context.onStage?.({ stage: 'browser:launch' });
         context.onProgress?.({ stage: 'frame:capture', frame: 1, frames: 2 });
         return artifact();
@@ -36,7 +37,7 @@ test('render provider job queue runs a job and records progress events', async (
     registry,
     onEvent: (event) => events.push(event),
     cleanup: async (record, context) => {
-      cleanupCalls.push({ jobId: record.jobId, reason: context.reason });
+      cleanupCalls.push({ jobId: record.jobId, reason: context.reason, cleanup: record.input.cleanup });
       return { ok: true, reason: context.reason };
     },
   });
@@ -47,6 +48,7 @@ test('render provider job queue runs a job and records progress events', async (
     providerId: 'browser-headless-screencast',
     surface: { url: 'http://example.test/' },
     video: { width: 640, height: 360, fps: 24, durationMs: 1000, frameCount: 2 },
+    cleanup: { retainPaths: [] },
   });
   let completed = await queue.wait(submitted.jobId);
 
@@ -55,7 +57,14 @@ test('render provider job queue runs a job and records progress events', async (
   assert.equal(completed.result.path, '/tmp/render.mp4');
   assert.equal(completed.cacheHit, false);
   assert.deepEqual(completed.cleanup, { ok: true, reason: 'succeeded' });
-  assert.deepEqual(cleanupCalls, [{ jobId: submitted.jobId, reason: 'succeeded' }]);
+  assert.deepEqual(cleanupCalls, [{
+    jobId: submitted.jobId,
+    reason: 'succeeded',
+    cleanup: {
+      retainPaths: [],
+      browserProfilePaths: ['/tmp/browser-profile'],
+    },
+  }]);
   assert.ok(events.some((event) => event.type === 'render-job:stage' && event.stage === 'browser:launch'));
   assert.ok(events.some((event) => event.type === 'render-job:progress' && event.progress.frame === 1));
   assert.ok(events.some((event) => event.type === 'render-job:cleanup-start'));

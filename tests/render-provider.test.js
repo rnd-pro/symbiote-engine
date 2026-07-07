@@ -229,6 +229,7 @@ test('local browser screencast provider runs with injected browser and ffmpeg', 
   let stages = [];
   let execCalls = [];
   let closed = false;
+  let launchOptions = null;
   let page = {
     mouse: { click: async () => {} },
     async setViewport(viewport) {
@@ -243,6 +244,7 @@ test('local browser screencast provider runs with injected browser and ffmpeg', 
   };
   let puppeteer = {
     async launch(options) {
+      launchOptions = options;
       return {
         options,
         async newPage() {
@@ -263,7 +265,7 @@ test('local browser screencast provider runs with injected browser and ffmpeg', 
     },
   });
 
-  let result = await provider.execute({
+  let job = {
     id: 'unit',
     output: { path: 'out/unit.mp4' },
     surface: { url: 'http://example.test/' },
@@ -277,7 +279,10 @@ test('local browser screencast provider runs with injected browser and ffmpeg', 
     setup: [],
     timeline: [],
     captions: { enabled: false, cues: [] },
-  }, {
+    cleanup: { retainPaths: [] },
+  };
+  let result = await provider.execute(job, {
+    browserProfileRoot: tmp,
     onStage(event) {
       stages.push(event.stage);
     },
@@ -312,6 +317,8 @@ test('local browser screencast provider runs with injected browser and ffmpeg', 
   assert.equal(execCalls.length, 1);
   assert.equal(execCalls[0].file, 'ffmpeg');
   assert.ok(execCalls[0].args.includes(join(tmp, 'out/unit.mp4')));
+  assert.ok(launchOptions.userDataDir.startsWith(tmp));
+  assert.deepEqual(job.cleanup.browserProfilePaths, [launchOptions.userDataDir]);
   assert.equal(closed, true);
   assert.deepEqual(result, {
     path: join(tmp, 'out/unit.mp4'),
