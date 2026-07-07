@@ -210,6 +210,7 @@ test('package metadata publishes provider subpaths', async () => {
 
   assert.equal(pkg.exports['./providers/*'], './providers/*');
   assert.equal(pkg.exports['./render-captions'], './render-captions.js');
+  assert.equal(pkg.exports['./render-proof'], './render-proof.js');
   assert.equal(pkg.exports['./render-progress'], './render-progress.js');
   assert.ok(pkg.files.includes('providers/'));
 });

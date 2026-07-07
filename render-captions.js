@@ -1,12 +1,4 @@
-function cleanString(value, fallback = '') {
-  let text = String(value ?? fallback ?? '').replace(/\s+/g, ' ').trim();
-  return text && text !== 'undefined' && text !== 'null' ? text : String(fallback || '').trim();
-}
-
-function finiteNonNegativeNumber(value, fallback = null) {
-  let number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? number : fallback;
-}
+import { cleanString, finiteNonNegativeNumber } from './render-utils.js';
 
 export function captionWordTimeSeconds(word = {}, key, fallback = 0) {
   let value = word[`${key}Sec`] ?? word[key] ?? fallback;

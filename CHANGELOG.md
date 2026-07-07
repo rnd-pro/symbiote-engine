@@ -17,6 +17,8 @@
   screencast jobs, deterministic frame cache keys, and retention cleanup.
 - Added `render-captions` helpers for reusable Whisper caption cue attribution
   and VTT generation in provider-backed render pipelines.
+- Added `render-proof` helpers for reusable ffprobe stream normalization and
+  A/V sync proof in provider-backed render pipelines.
 - Added `render-progress` helpers for reusable render stage evidence and
   progress timeline tracking.
 - Refactored `ai/tts` and `ai/whisper` packs to use injected audio provider

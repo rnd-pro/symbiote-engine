@@ -149,6 +149,8 @@ symbiote-engine inspect workflow.json --json
   with model-service readiness gating.
 - `symbiote-engine/render-cache` — Node-only frame cache keys, in-memory frame
   cache store, and render retention cleanup helpers.
+- `symbiote-engine/render-proof` — ffprobe stream normalization and A/V sync
+  proof helpers for provider-backed render pipelines.
 - `symbiote-engine/render-jobs` — engine-owned render provider job queue
   primitives with progress, timeout, cancel, cache-hit, and cleanup events.
 - `symbiote-engine/packs/*` — reusable domain packs and node handlers.

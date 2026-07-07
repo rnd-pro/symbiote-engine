@@ -1,16 +1,4 @@
-function isObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function cleanString(value, fallback = '') {
-  let text = String(value ?? fallback ?? '').replace(/\s+/g, ' ').trim();
-  return text && text !== 'undefined' && text !== 'null' ? text : String(fallback || '').trim();
-}
-
-function finiteNonNegativeNumber(value, fallback = null) {
-  let number = Number(value);
-  return Number.isFinite(number) && number >= 0 ? number : fallback;
-}
+import { cleanString, finiteNonNegativeNumber, isObject } from './render-utils.js';
 
 function metadataKeyList(value) {
   return [...new Set((Array.isArray(value) ? value : [])

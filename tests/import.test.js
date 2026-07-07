@@ -16,6 +16,7 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.createPersistenceAdapter, 'function');
   assert.equal(typeof engine.createRenderFrameCacheKey, 'function');
   assert.equal(typeof engine.createRenderRetentionCleanup, 'function');
+  assert.equal(typeof engine.buildRenderAvSyncProof, 'function');
   assert.equal(typeof engine.createStageProgressTracker, 'function');
 });
 
@@ -46,6 +47,12 @@ test('render progress subpath imports in Node', async () => {
   let renderProgress = await import('symbiote-engine/render-progress');
 
   assert.equal(typeof renderProgress.createStageProgressTracker, 'function');
+});
+
+test('render proof subpath imports in Node', async () => {
+  let renderProof = await import('symbiote-engine/render-proof');
+
+  assert.equal(typeof renderProof.buildRenderAvSyncProof, 'function');
 });
 
 test('browser engine API excludes Node-only runtime modules', async () => {
