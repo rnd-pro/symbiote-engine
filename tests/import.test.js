@@ -28,6 +28,8 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.isTerminalRenderStatus, 'function');
   assert.equal(typeof engine.buildTerminalRenderJobPatch, 'function');
   assert.equal(typeof engine.buildRenderQueueSnapshot, 'function');
+  assert.equal(typeof engine.createRenderCanceledError, 'function');
+  assert.equal(typeof engine.createRenderTimeoutError, 'function');
   assert.equal(typeof engine.buildRenderAudioLayerProof, 'function');
   assert.equal(typeof engine.buildRenderAvSyncProof, 'function');
   assert.equal(typeof engine.createStageProgressTracker, 'function');
@@ -84,6 +86,8 @@ test('render lifecycle subpath imports in Node', async () => {
   assert.equal(typeof renderLifecycle.isTerminalRenderStatus, 'function');
   assert.equal(typeof renderLifecycle.buildTerminalRenderJobPatch, 'function');
   assert.equal(typeof renderLifecycle.buildRenderQueueSnapshot, 'function');
+  assert.equal(typeof renderLifecycle.createRenderCanceledError, 'function');
+  assert.equal(typeof renderLifecycle.createRenderTimeoutError, 'function');
 });
 
 test('render proof subpath imports in Node', async () => {

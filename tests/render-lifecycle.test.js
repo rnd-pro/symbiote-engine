@@ -5,6 +5,8 @@ import {
   buildRenderQueueSnapshot,
   buildTerminalRenderJobPatch,
   classifyRenderError,
+  createRenderCanceledError,
+  createRenderTimeoutError,
   isRenderTimeout,
   isTerminalRenderStatus,
   mapRenderEventToProgress,
@@ -68,6 +70,37 @@ test('render lifecycle classifies render errors by stable kind and code', () => 
   assert.equal(isRenderTimeout({ code: 'E_PROVIDER' }), false);
 });
 
+test('render lifecycle creates stable render terminal errors', () => {
+  let canceled = createRenderCanceledError('operator canceled');
+  assert.equal(canceled.message, 'operator canceled');
+  assert.equal(canceled.code, 'RENDER_JOB_CANCELED');
+  assert.equal(canceled.canceled, true);
+  assert.deepEqual(classifyRenderError(canceled), {
+    kind: 'canceled',
+    code: 'RENDER_JOB_CANCELED',
+    detail: 'operator canceled',
+  });
+
+  let timeout = createRenderTimeoutError('browser waited too long', {
+    renderJobId: 'render-1',
+    audioJobId: 'audio-1',
+  });
+  assert.equal(timeout.message, 'browser waited too long');
+  assert.equal(timeout.code, 'RENDER_JOB_TIMEOUT');
+  assert.equal(timeout.timeout, true);
+  assert.equal(timeout.timeoutReason, 'browser waited too long');
+  assert.equal(timeout.renderJobId, 'render-1');
+  assert.equal(timeout.audioJobId, 'audio-1');
+  assert.equal('renderQueue' in timeout, false);
+  assert.equal('audioQueue' in timeout, false);
+  assert.deepEqual(classifyRenderError(timeout), {
+    kind: 'timeout',
+    code: 'RENDER_JOB_TIMEOUT',
+    detail: 'browser waited too long',
+  });
+  assert.equal(isRenderTimeout(timeout), true);
+});
+
 test('render lifecycle exposes terminal render status vocabulary', () => {
   for (let status of ['succeeded', 'failed', 'canceled', 'timeout']) {
     assert.equal(isTerminalRenderStatus(status), true);
@@ -87,6 +120,17 @@ test('render lifecycle builds neutral terminal failure patches', () => {
 });
 
 test('render lifecycle builds neutral timeout patches with id fallbacks', () => {
+  assert.deepEqual(buildTerminalRenderJobPatch(
+    createRenderTimeoutError('provider timeout', { renderJobId: 'render-direct', audioJobId: 'audio-direct' }),
+    { renderJobId: 'render-fallback', audioJobId: 'audio-fallback' },
+  ), {
+    status: 'timeout',
+    timeout: true,
+    timeoutReason: 'provider timeout',
+    error: 'provider timeout',
+    renderJobId: 'render-direct',
+    audioJobId: 'audio-direct',
+  });
   assert.deepEqual(buildTerminalRenderJobPatch(
     { code: 'RENDER_JOB_TIMEOUT', timeoutReason: 'browser waited too long', renderJobId: 'render-direct' },
     { renderJobId: 'render-fallback', audioJobId: 'audio-fallback' },

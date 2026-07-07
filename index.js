@@ -113,6 +113,8 @@ export {
   buildRenderQueueSnapshot,
   buildTerminalRenderJobPatch,
   classifyRenderError,
+  createRenderCanceledError,
+  createRenderTimeoutError,
   isRenderTimeout,
   isTerminalRenderStatus,
   mapRenderEventToProgress,

@@ -61,6 +61,26 @@ function errorDetail(input = {}) {
   );
 }
 
+export function createRenderCanceledError(reason = 'render job canceled') {
+  let error = new Error(cleanString(reason, 'render job canceled') || 'render job canceled');
+  error.code = 'RENDER_JOB_CANCELED';
+  error.canceled = true;
+  return error;
+}
+
+export function createRenderTimeoutError(reason = 'render job timed out', details = {}) {
+  let message = cleanString(reason, 'render job timed out') || 'render job timed out';
+  let error = new Error(message);
+  error.code = 'RENDER_JOB_TIMEOUT';
+  error.timeout = true;
+  error.timeoutReason = message;
+  if (details.renderQueue) error.renderQueue = details.renderQueue;
+  if (details.audioQueue) error.audioQueue = details.audioQueue;
+  if (details.renderJobId) error.renderJobId = details.renderJobId;
+  if (details.audioJobId) error.audioJobId = details.audioJobId;
+  return error;
+}
+
 export function classifyRenderError(error = {}) {
   let code = errorCode(error);
   let detail = errorDetail(error);
