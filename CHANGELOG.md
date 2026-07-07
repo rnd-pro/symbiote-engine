@@ -20,8 +20,8 @@
 - Added `render-finalize` helpers for reusable frame-sequence encode args,
   audio concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest
   projection.
-- Added `render-lifecycle` helpers for reusable render event progress mapping
-  and stable render error taxonomy.
+- Added `render-lifecycle` helpers for reusable render event progress mapping,
+  terminal job patches, and stable render error taxonomy.
 - Added `render-proof` helpers for reusable ffprobe stream normalization,
   audio/speaker layer proof, and A/V sync proof in provider-backed render
   pipelines.

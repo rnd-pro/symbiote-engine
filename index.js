@@ -106,8 +106,10 @@ export {
   parseFfprobeJson,
 } from './render-finalize.js';
 export {
+  buildTerminalRenderJobPatch,
   classifyRenderError,
   isRenderTimeout,
+  isTerminalRenderStatus,
   mapRenderEventToProgress,
 } from './render-lifecycle.js';
 export {

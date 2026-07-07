@@ -20,6 +20,8 @@ const PROGRESS_BY_STAGE = Object.freeze({
   done: 0.84,
 });
 
+export const TERMINAL_RENDER_STATUSES = Object.freeze(new Set(['succeeded', 'failed', 'canceled', 'timeout']));
+
 function clampProgress(value, fallback = 0) {
   let number = finiteNonNegativeNumber(value, fallback);
   if (!Number.isFinite(number)) number = fallback;
@@ -73,6 +75,45 @@ export function classifyRenderError(error = {}) {
 
 export function isRenderTimeout(error = {}) {
   return classifyRenderError(error).kind === 'timeout';
+}
+
+export function isTerminalRenderStatus(status) {
+  return TERMINAL_RENDER_STATUSES.has(cleanString(status, ''));
+}
+
+export function buildTerminalRenderJobPatch(errorOrRecord = {}, jobContext = {}) {
+  let classification = classifyRenderError(errorOrRecord);
+  let canceled = jobContext?.cancelRequested === true || classification.kind === 'canceled';
+  if (canceled) {
+    let cancelReason = cleanString(
+      jobContext?.cancelReason || classification.detail || errorDetail(errorOrRecord),
+      'render job canceled',
+    );
+    return {
+      status: 'canceled',
+      ...(cancelReason ? { cancelReason } : {}),
+    };
+  }
+  if (classification.kind === 'timeout') {
+    let timeoutReason = cleanString(
+      classification.detail || jobContext?.timeoutReason || errorDetail(errorOrRecord),
+      'render job timed out',
+    );
+    let renderJobId = cleanString(errorOrRecord?.renderJobId || jobContext?.renderJobId, '');
+    let audioJobId = cleanString(errorOrRecord?.audioJobId || jobContext?.audioJobId, '');
+    return {
+      status: 'timeout',
+      timeout: true,
+      timeoutReason,
+      error: timeoutReason,
+      ...(renderJobId ? { renderJobId } : {}),
+      ...(audioJobId ? { audioJobId } : {}),
+    };
+  }
+  return {
+    status: 'failed',
+    error: cleanString(classification.detail || errorDetail(errorOrRecord), 'render job failed'),
+  };
 }
 
 export function mapRenderEventToProgress(event = {}, options = {}) {

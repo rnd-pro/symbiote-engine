@@ -21,6 +21,8 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.buildAudioOverlapMixArgs, 'function');
   assert.equal(typeof engine.mapRenderEventToProgress, 'function');
   assert.equal(typeof engine.classifyRenderError, 'function');
+  assert.equal(typeof engine.isTerminalRenderStatus, 'function');
+  assert.equal(typeof engine.buildTerminalRenderJobPatch, 'function');
   assert.equal(typeof engine.buildRenderAudioLayerProof, 'function');
   assert.equal(typeof engine.buildRenderAvSyncProof, 'function');
   assert.equal(typeof engine.createStageProgressTracker, 'function');
@@ -71,6 +73,8 @@ test('render lifecycle subpath imports in Node', async () => {
   assert.equal(typeof renderLifecycle.mapRenderEventToProgress, 'function');
   assert.equal(typeof renderLifecycle.classifyRenderError, 'function');
   assert.equal(typeof renderLifecycle.isRenderTimeout, 'function');
+  assert.equal(typeof renderLifecycle.isTerminalRenderStatus, 'function');
+  assert.equal(typeof renderLifecycle.buildTerminalRenderJobPatch, 'function');
 });
 
 test('render proof subpath imports in Node', async () => {
