@@ -209,3 +209,50 @@ test('render provider job queue returns new cache-hit job ids for idempotent rer
   assert.equal(second.result.path, '/tmp/cache.mp4');
   assert.equal(calls, 1);
 });
+
+test('render provider job queue deduplicates in-flight same-key submits', async () => {
+  let calls = 0;
+  let releaseFirst;
+  let firstBlocker = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let registry = createRenderProviderRegistry([
+    {
+      id: 'browser-headless-screencast',
+      kind: 'screencast',
+      execute: async () => {
+        calls += 1;
+        await firstBlocker;
+        return artifact('/tmp/inflight-cache.mp4');
+      },
+    },
+  ]);
+  let queue = createRenderProviderJobQueue({ registry });
+  let request = {
+    id: 'inflight-cache-smoke',
+    kind: 'screencast',
+    providerId: 'browser-headless-screencast',
+    cacheKey: 'render:inflight-stable-smoke',
+    surface: { url: 'http://example.test/' },
+    video: { width: 640, height: 360, fps: 24, durationMs: 1000, frameCount: 2 },
+  };
+
+  let first = await queue.submit(request);
+  let duplicate = await queue.submit({ ...request, id: 'inflight-cache-dup' });
+
+  assert.equal(first.status, 'running');
+  assert.equal(duplicate.jobId, first.jobId);
+  assert.equal(duplicate.idempotent, true);
+  assert.equal(calls, 1);
+
+  releaseFirst();
+  let completed = await queue.wait(first.jobId);
+  let cacheHit = await queue.submit({ ...request, id: 'inflight-cache-again' });
+
+  assert.equal(completed.status, 'succeeded');
+  assert.equal(cacheHit.status, 'succeeded');
+  assert.equal(cacheHit.cacheHit, true);
+  assert.notEqual(cacheHit.jobId, completed.jobId);
+  assert.equal(cacheHit.result.path, '/tmp/inflight-cache.mp4');
+  assert.equal(calls, 1);
+});

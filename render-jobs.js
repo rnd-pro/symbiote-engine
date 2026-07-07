@@ -191,6 +191,13 @@ export function createRenderProviderJobQueue(options = {}) {
     if (!queue.includes(jobId)) queue.push(jobId);
   }
 
+  function activeRecordByCacheKey(cacheKey) {
+    for (let record of records.values()) {
+      if (record.cacheKey === cacheKey && !TERMINAL_STATUSES.has(record.status)) return record;
+    }
+    return null;
+  }
+
   async function runCleanup(record, reason) {
     emit('render-job:cleanup-start', record, { reason });
     try {
@@ -288,13 +295,12 @@ export function createRenderProviderJobQueue(options = {}) {
     async submit(request = {}) {
       let job = normalizeRenderJob(request);
       let cacheKey = cleanString(request.cacheKey, createRenderJobCacheKey(job));
-      let record = createRecord(job, cacheKey);
-      record.timeoutMs = Math.max(0, Math.round(Number(request.timeoutMs ?? defaultTimeoutMs)));
-      records.set(record.jobId, record);
-      emit('render-job:accepted', record);
-
       let cached = cache.get(cacheKey);
       if (cached) {
+        let record = createRecord(job, cacheKey);
+        record.timeoutMs = Math.max(0, Math.round(Number(request.timeoutMs ?? defaultTimeoutMs)));
+        records.set(record.jobId, record);
+        emit('render-job:accepted', record);
         record.status = 'succeeded';
         record.cacheHit = true;
         record.result = cloneJson(cached);
@@ -304,6 +310,13 @@ export function createRenderProviderJobQueue(options = {}) {
         return snapshot(record);
       }
 
+      let active = activeRecordByCacheKey(cacheKey);
+      if (active) return { ...snapshot(active), idempotent: true };
+
+      let record = createRecord(job, cacheKey);
+      record.timeoutMs = Math.max(0, Math.round(Number(request.timeoutMs ?? defaultTimeoutMs)));
+      records.set(record.jobId, record);
+      emit('render-job:accepted', record);
       insertQueued(record.jobId);
       emit('render-job:queued', record);
       pump();
