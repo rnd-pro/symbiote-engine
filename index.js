@@ -97,6 +97,12 @@ export {
   renderVtt,
 } from './render-captions.js';
 export {
+  buildAudioMuxArgs,
+  buildFrameSequenceEncodeArgs,
+  buildRenderProofManifestProjection,
+  parseFfprobeJson,
+} from './render-finalize.js';
+export {
   buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
   countClipOverlaps,
