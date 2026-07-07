@@ -209,6 +209,7 @@ test('package metadata publishes provider subpaths', async () => {
   let pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
   assert.equal(pkg.exports['./providers/*'], './providers/*');
+  assert.equal(pkg.exports['./render-captions'], './render-captions.js');
   assert.ok(pkg.files.includes('providers/'));
 });
 

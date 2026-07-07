@@ -86,5 +86,15 @@ export {
   normalizeRenderSeed,
 } from './render-cache.js';
 export { createRenderJobCacheKey, createRenderProviderJobQueue } from './render-jobs.js';
+export {
+  buildCaptionCues,
+  captionAttributionForRange,
+  captionCuesFromClipTranscripts,
+  captionCuesFromTranscript,
+  captionTranscriptDurationSec,
+  captionWordTimeSeconds,
+  overlapMs,
+  renderVtt,
+} from './render-captions.js';
 export { createLocalAudioTtsProvider } from './providers/local-audio-tts.js';
 export { createLocalAudioTranscribeProvider } from './providers/local-audio-transcribe.js';

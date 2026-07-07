@@ -15,6 +15,8 @@
   changes.
 - Added render provider job queue and render cache helpers for provider-backed
   screencast jobs, deterministic frame cache keys, and retention cleanup.
+- Added `render-captions` helpers for reusable Whisper caption cue attribution
+  and VTT generation in provider-backed render pipelines.
 - Refactored `ai/tts` and `ai/whisper` packs to use injected audio provider
   queues instead of serialized remote paths, SSH mode, or localhost endpoint
   defaults.
