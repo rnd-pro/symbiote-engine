@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
+  countClipOverlaps,
   durationDriftMs,
   findProbeStream,
   normalizeProbeStreams,
@@ -35,6 +37,129 @@ function ffprobe({ videoDuration = '1.000000', audioDuration = '1.000000', video
     format: { duration: videoDuration },
   };
 }
+
+test('audio layer proof returns null for empty input and uses neutral default speakers', () => {
+  assert.equal(buildRenderAudioLayerProof(), null);
+
+  let proof = buildRenderAudioLayerProof({
+    items: [{ durationMs: 500, voiceRef: 'voice-a' }],
+    cueTimings: [{ startMs: 0, durationMs: 500, requestedStartMs: 0 }],
+    thresholdMs: 40,
+  });
+
+  assert.equal(proof.ok, true);
+  assert.equal(proof.sequenceMode, 'sequential');
+  assert.equal(proof.speakerLayers.length, 1);
+  assert.equal(proof.speakerLayers[0].persona, 'speaker-0');
+  assert.equal(proof.speakerLayers[0].id, 'voice:speaker-0');
+  assert.equal(proof.mixDurationMs, 500);
+});
+
+test('audio layer proof builds two speaker sequential layers with injected labels', () => {
+  let proof = buildRenderAudioLayerProof({
+    items: [
+      { durationMs: 1000, persona: 'guide', voiceRef: 'voice-guide', artifactId: 'a1', sha256: 's1' },
+      { durationMs: 900, persona: 'ops', voiceRef: 'voice-ops', artifactId: 'a2', sha256: 's2' },
+    ],
+    cueTimings: [
+      { startMs: 0, endMs: 1000, durationMs: 1000, requestedStartMs: 0 },
+      { startMs: 1000, endMs: 1900, durationMs: 900, requestedStartMs: 1000 },
+    ],
+    mixDurationMs: 1900,
+    thresholdMs: 40,
+    fallbackSpeakerForIndex: (index) => index % 2 ? 'ops' : 'guide',
+    layerIdForClip: (clip) => `speaker:${clip.persona}`,
+    layerLabelForClip: (clip) => `${clip.persona.toUpperCase()} narration`,
+  });
+
+  assert.equal(proof.ok, true);
+  assert.equal(proof.overlapCount, 0);
+  assert.deepEqual(proof.distinctVoiceRefs, ['voice-guide', 'voice-ops']);
+  assert.equal(proof.totalClipDurationMs, 1900);
+  assert.equal(proof.durationDriftMs, 0);
+  assert.deepEqual(proof.speakerLayers.map((layer) => layer.id), ['speaker:guide', 'speaker:ops']);
+  assert.deepEqual(proof.speakerLayers.map((layer) => layer.label), ['GUIDE narration', 'OPS narration']);
+});
+
+test('audio layer proof validates cue counts, overlap mode, and exact drift threshold', () => {
+  let mismatch = buildRenderAudioLayerProof({
+    items: [{ durationMs: 500, persona: 'guide', voiceRef: 'voice-guide' }],
+    cueTimings: [],
+    thresholdMs: 40,
+  });
+  let noOverlap = buildRenderAudioLayerProof({
+    sequenceMode: 'overlap',
+    items: [
+      { durationMs: 500, persona: 'guide', voiceRef: 'voice-guide' },
+      { durationMs: 500, persona: 'ops', voiceRef: 'voice-ops' },
+    ],
+    cueTimings: [
+      { startMs: 0, durationMs: 500 },
+      { startMs: 500, durationMs: 500 },
+    ],
+    mixDurationMs: 1000,
+    thresholdMs: 40,
+  });
+  let exactThreshold = buildRenderAudioLayerProof({
+    items: [
+      { durationMs: 500, persona: 'guide', voiceRef: 'voice-guide' },
+      { durationMs: 500, persona: 'ops', voiceRef: 'voice-ops' },
+    ],
+    cueTimings: [
+      { startMs: 0, durationMs: 500, requestedStartMs: 0 },
+      { startMs: 500, durationMs: 500, requestedStartMs: 500 },
+    ],
+    mixDurationMs: 1040,
+    thresholdMs: 40,
+  });
+  let noRequestedStarts = buildRenderAudioLayerProof({
+    items: [
+      { durationMs: 500, persona: 'guide', voiceRef: 'voice-guide' },
+      { durationMs: 500, persona: 'ops', voiceRef: 'voice-ops' },
+    ],
+    cueTimings: [
+      { startMs: 0, durationMs: 500 },
+      { startMs: 500, durationMs: 500 },
+    ],
+    mixDurationMs: 1000,
+    thresholdMs: 40,
+  });
+
+  assert.equal(mismatch.ok, false);
+  assert.match(mismatch.errors.join('\n'), /matching item and cue timing counts/);
+  assert.equal(noOverlap.ok, false);
+  assert.match(noOverlap.errors.join('\n'), /overlap audio sequence requires/);
+  assert.equal(exactThreshold.ok, true);
+  assert.equal(exactThreshold.durationDriftMs, 40);
+  assert.equal(noRequestedStarts.ok, true);
+});
+
+test('audio layer proof detects overlapping clips and missing distinct voice refs', () => {
+  assert.equal(countClipOverlaps([
+    { startMs: 0, endMs: 500 },
+    { startMs: 470, endMs: 900 },
+    { startMs: 900, endMs: 1200 },
+  ], 20), 1);
+
+  let proof = buildRenderAudioLayerProof({
+    sequenceMode: 'sequential',
+    items: [
+      { durationMs: 600, persona: 'guide', voiceRef: 'same-voice' },
+      { durationMs: 600, persona: 'ops', voiceRef: 'same-voice' },
+    ],
+    cueTimings: [
+      { startMs: 0, durationMs: 600, requestedStartMs: 0 },
+      { startMs: 500, durationMs: 600, requestedStartMs: 500 },
+    ],
+    mixDurationMs: 1200,
+    thresholdMs: 40,
+  });
+
+  assert.equal(proof.ok, false);
+  assert.match(proof.errors.join('\n'), /starts 100ms before the sequential cursor/);
+  assert.match(proof.errors.join('\n'), /1 overlapping voice clips/);
+  assert.match(proof.errors.join('\n'), /two-speaker render requires/);
+});
 
 test('render proof normalizes probe streams and stream durations', () => {
   let probe = ffprobe({ videoDuration: '1.250000' });

@@ -97,7 +97,9 @@ export {
   renderVtt,
 } from './render-captions.js';
 export {
+  buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
+  countClipOverlaps,
   durationDriftMs,
   findProbeStream,
   normalizeProbeStreams,
