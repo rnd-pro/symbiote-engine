@@ -409,6 +409,69 @@ test('local browser screencast provider can return a frame-sequence artifact wit
   assert.equal(stages.includes('encode:start'), false);
 });
 
+test('local browser screencast provider waits for document fonts before capture', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-font-readiness-'));
+  let stageOrder = [];
+  let calls = [];
+  let page = {
+    mouse: { click: async () => {} },
+    async setViewport(viewport) {
+      this.viewport = viewport;
+    },
+    async goto(url) {
+      this.url = url;
+    },
+    async evaluate(_fn, payload) {
+      calls.push(payload);
+      return { supported: true, ready: true };
+    },
+    async screenshot(options) {
+      stageOrder.push(`screenshot:${options.path}`);
+    },
+  };
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        return {
+          async newPage() { return page; },
+          async close() {},
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+
+  await provider.execute({
+    id: 'font-ready-unit',
+    output: { path: 'out/font-ready.mp4' },
+    surface: { url: 'http://example.test/fonts' },
+    video: {
+      width: 320,
+      height: 180,
+      fps: 1000,
+      durationMs: 1,
+      frameCount: 1,
+    },
+    readiness: { fontsTimeoutMs: 5000 },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+  }, {
+    artifactKind: 'frame-sequence',
+    onStage(event) {
+      stageOrder.push(event.stage);
+    },
+  });
+
+  assert.deepEqual(calls, [{ timeoutMs: 5000 }]);
+  assert.ok(stageOrder.indexOf('setup:done') < stageOrder.indexOf('fonts:wait'));
+  assert.ok(stageOrder.indexOf('fonts:wait') < stageOrder.indexOf('fonts:ready'));
+  assert.ok(stageOrder.indexOf('fonts:ready') < stageOrder.indexOf('capture:start'));
+  assert.ok(stageOrder.indexOf('capture:start') < stageOrder.findIndex((stage) => stage.startsWith('screenshot:')));
+});
+
 test('local browser screencast provider aborts capture and closes browser', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-render-abort-'));
   let controller = new AbortController();
@@ -549,7 +612,8 @@ test('local browser screencast provider can call live page methods and capture s
     ['__maximoTourRender', 'playProviderTour'],
     ['__maximoTourRender', 'playProviderTour'],
   ]);
-  assert.equal(evaluateCalls.length, 2);
+  assert.equal(evaluateCalls.length, 3);
+  assert.deepEqual(evaluateCalls[1], { timeoutMs: 10000 });
   assert.equal(state.samples.length, 1);
   assert.equal(state.samples[0].state.status, 'playing');
   assert.equal(state.samples[0].state.caption.text, 'Live caption');

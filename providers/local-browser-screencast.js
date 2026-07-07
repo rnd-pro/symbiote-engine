@@ -144,6 +144,21 @@ async function waitForWindowPredicate(page, path, timeoutMs = 10000) {
   );
 }
 
+async function waitForFontsReady(page, timeoutMs = 10000) {
+  if (typeof page.evaluate !== 'function') return { supported: false };
+  return page.evaluate(async ({ timeoutMs: limitMs }) => {
+    if (!document.fonts?.ready) return { supported: false };
+    let ready = document.fonts.ready.then(() => ({ supported: true, ready: true }));
+    if (!limitMs) return ready;
+    let timeout = new Promise((resolve) => {
+      setTimeout(() => resolve({ supported: true, ready: false, timedOut: true }), Math.max(0, limitMs));
+    });
+    let result = await Promise.race([ready, timeout]);
+    if (result?.timedOut) throw new Error(`document fonts did not become ready within ${limitMs}ms`);
+    return result;
+  }, { timeoutMs });
+}
+
 async function callWindowMethod(page, action, log) {
   let parts = cleanPathParts(action.path, 'callWindowMethod.path');
   log(`call window method: ${parts.join('.')}`);
@@ -491,6 +506,10 @@ export function createLocalBrowserScreencastProvider(options = {}) {
           });
         }
         emitStage(executionOptions, 'setup:done', { actions: setupActions.length });
+
+        emitStage(executionOptions, 'fonts:wait');
+        await withAbort(waitForFontsReady(page, job.readiness?.fontsTimeoutMs || 10000), signal);
+        emitStage(executionOptions, 'fonts:ready');
 
         if (job.captions?.enabled) {
           emitStage(executionOptions, 'captions-overlay:install');
