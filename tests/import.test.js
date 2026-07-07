@@ -16,6 +16,7 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.createPersistenceAdapter, 'function');
   assert.equal(typeof engine.createRenderFrameCacheKey, 'function');
   assert.equal(typeof engine.createRenderRetentionCleanup, 'function');
+  assert.equal(typeof engine.createStageProgressTracker, 'function');
 });
 
 test('graph can be constructed without browser runtime', async () => {
@@ -39,6 +40,12 @@ test('render cache subpath imports in Node', async () => {
   assert.equal(typeof renderCache.createRenderFrameCacheKey, 'function');
   assert.equal(typeof renderCache.createMemoryFrameCacheStore, 'function');
   assert.equal(typeof renderCache.createRenderRetentionCleanup, 'function');
+});
+
+test('render progress subpath imports in Node', async () => {
+  let renderProgress = await import('symbiote-engine/render-progress');
+
+  assert.equal(typeof renderProgress.createStageProgressTracker, 'function');
 });
 
 test('browser engine API excludes Node-only runtime modules', async () => {

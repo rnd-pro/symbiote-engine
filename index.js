@@ -96,5 +96,6 @@ export {
   overlapMs,
   renderVtt,
 } from './render-captions.js';
+export { createStageProgressTracker } from './render-progress.js';
 export { createLocalAudioTtsProvider } from './providers/local-audio-tts.js';
 export { createLocalAudioTranscribeProvider } from './providers/local-audio-transcribe.js';
