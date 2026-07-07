@@ -23,6 +23,8 @@ const CLEANUP_RETAIN_KEYS = [
   'reusableCachePaths',
 ];
 
+export const RENDER_CACHE_PROJECTION_VERSION = 2;
+
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -68,12 +70,54 @@ function compactObject(value) {
   return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
+function mergePlain(base = {}, value = {}) {
+  return {
+    ...(isObject(base) ? base : {}),
+    ...(isObject(value) ? value : {}),
+  };
+}
+
+function cleanCacheString(value, fallback = '') {
+  return cleanString(value, fallback).slice(0, 512);
+}
+
+function sanitizeUrl(value) {
+  let text = cleanString(value, '');
+  if (!text) return '';
+  let isAbsoluteUrl = /^[a-z][a-z0-9+.-]*:/i.test(text);
+  try {
+    let url = new URL(text, 'http://symbiote.local');
+    url.hash = '';
+    for (let key of [...url.searchParams.keys()]) {
+      if (/^(token|auth|authorization|access_token|bearer|api[_-]?key|key|secret|password|sig|signature)$/i.test(key)) {
+        url.searchParams.delete(key);
+      }
+    }
+    if (!isAbsoluteUrl) return `${url.pathname}${url.search}`;
+    return `${url.protocol}//${url.host}${url.pathname}${url.search}`;
+  } catch {
+    return text.replace(/#.*$/, '').replace(/([?&])(?:token|auth|authorization|access_token|bearer|api[_-]?key|key|secret|password|sig|signature)=[^&]*/ig, '$1');
+  }
+}
+
+function routeFromUrl(value) {
+  let text = sanitizeUrl(value);
+  if (!text) return '';
+  try {
+    let url = new URL(text, 'http://symbiote.local');
+    return `${url.pathname}${url.search}`;
+  } catch {
+    return text.startsWith('/') ? text : '';
+  }
+}
+
 function pickSurface(seed) {
   let surface = isObject(seed.surface) ? seed.surface : {};
   let source = isObject(seed.source) ? seed.source : {};
+  let url = sanitizeUrl(seed.url || source.url || surface.url);
   return compactObject({
-    url: seed.url || source.url || surface.url,
-    route: seed.route || source.route || surface.route,
+    url,
+    route: sanitizeUrl(seed.route || source.route || surface.route || routeFromUrl(url)),
     surface: seed.activeSurface || surface.surface || surface.id || seed.surfaceId,
     tab: seed.activeTab || surface.tab || surface.tabId || seed.tabId,
   });
@@ -85,6 +129,7 @@ function pickViewport(seed) {
   return compactObject({
     width: viewport.width || video.viewportWidth || video.width,
     height: viewport.height || video.viewportHeight || video.height,
+    dpr: seed.dpr || seed.deviceScaleFactor || viewport.dpr || viewport.deviceScaleFactor,
   });
 }
 
@@ -98,27 +143,71 @@ function pickOutput(seed) {
   });
 }
 
-function frameCacheProjection(seed = {}, extra = {}) {
-  let timeline = isObject(seed.timeline) ? seed.timeline : {};
-  let render = isObject(seed.render) ? seed.render : {};
-  let app = isObject(seed.app) ? seed.app : {};
-  let data = isObject(seed.data) ? seed.data : {};
-  let viewport = isObject(seed.viewport) ? seed.viewport : {};
+function normalizedProjectionVersion(options = {}) {
+  let version = Math.round(Number(options.version || RENDER_CACHE_PROJECTION_VERSION));
+  return Number.isFinite(version) && version > 0 ? version : RENDER_CACHE_PROJECTION_VERSION;
+}
+
+export function normalizeRenderSeed(seed = {}, defaults = {}) {
+  let raw = isObject(seed) ? seed : {};
+  let fallback = isObject(defaults) ? defaults : {};
+  let render = mergePlain(fallback.render, raw.render);
+  let timeline = mergePlain(fallback.timeline, raw.timeline);
+  let app = mergePlain(fallback.app, raw.app);
+  let data = mergePlain(fallback.data, raw.data);
+  let viewport = mergePlain(fallback.viewport, raw.viewport);
+  let source = mergePlain(fallback.source, raw.source);
+  let surface = mergePlain(fallback.surface, raw.surface);
+  let state = raw.state ?? fallback.state;
+  let appBuild = cleanCacheString(
+    raw.appBuild || raw.build || raw.version || app.build || app.version || fallback.appBuild || fallback.build || fallback.version,
+  );
+  let dataHash = cleanCacheString(
+    raw.dataHash || data.hash || data.version || fallback.dataHash || fallback.data?.hash || fallback.data?.version,
+  );
+  if (!appBuild) throw new Error('render seed appBuild is required for cache identity');
+  if (!dataHash) throw new Error('render seed dataHash is required for cache identity');
+
   return compactObject({
-    providerId: seed.providerId || render.providerId,
-    renderer: seed.renderer || render.renderer || seed.renderProvider?.id,
-    source: pickSurface(seed),
-    theme: seed.theme || seed.cascadeTheme || render.theme,
-    viewport: pickViewport(seed),
-    dpr: seed.dpr || seed.deviceScaleFactor || viewport.dpr || viewport.deviceScaleFactor,
-    output: pickOutput(seed),
-    timelineHash: seed.timelineHash || timeline.hash || render.timelineHash,
-    appBuild: seed.appBuild || seed.build || seed.version || app.build || app.version,
-    dataHash: seed.dataHash || data.hash || data.version,
-    capture: seed.capture || render.capture,
-    providerSettings: seed.providerSettings || render.providerSettings,
-    extra,
+    providerId: cleanCacheString(raw.providerId || render.providerId || fallback.providerId),
+    renderer: cleanCacheString(raw.renderer || render.renderer || raw.renderProvider?.id || fallback.renderer),
+    source: pickSurface({
+      ...fallback,
+      ...raw,
+      source,
+      surface,
+    }),
+    theme: raw.theme ?? fallback.theme ?? render.theme,
+    cascadeTheme: raw.cascadeTheme ?? fallback.cascadeTheme ?? render.cascadeTheme,
+    viewport: pickViewport({
+      ...fallback,
+      ...raw,
+      viewport,
+      video: mergePlain(fallback.video, raw.video),
+    }),
+    dpr: raw.dpr || raw.deviceScaleFactor || viewport.dpr || viewport.deviceScaleFactor || fallback.dpr || fallback.deviceScaleFactor,
+    output: pickOutput({
+      ...fallback,
+      ...raw,
+      output: mergePlain(fallback.output, raw.output),
+      video: mergePlain(fallback.video, raw.video),
+    }),
+    timelineHash: cleanCacheString(raw.timelineHash || timeline.hash || render.timelineHash || fallback.timelineHash),
+    appBuild,
+    dataHash,
+    state,
+    stateHash: cleanCacheString(raw.stateHash || (isObject(state) || Array.isArray(state) ? `sha256:${stableHash(state)}` : '')),
+    capture: raw.capture ?? fallback.capture ?? render.capture,
+    providerSettings: raw.providerSettings ?? fallback.providerSettings ?? render.providerSettings,
   }) || {};
+}
+
+export function createRenderSeedProjection(seed = {}, extra = {}, options = {}) {
+  return compactObject({
+    version: normalizedProjectionVersion(options),
+    ...normalizeRenderSeed(seed, options.defaults || {}),
+    extra,
+  }) || { version: normalizedProjectionVersion(options) };
 }
 
 function arrayFrom(value) {
@@ -196,11 +285,12 @@ async function exists(path) {
   }
 }
 
-export function createRenderFrameCacheKey(seed = {}, extra = {}) {
-  return `frame:${stableHash({
-    version: 1,
-    ...frameCacheProjection(seed, extra),
-  })}`;
+export function createRenderFrameCacheKey(seed = {}, extra = {}, options = {}) {
+  return `frame:${stableHash(createRenderSeedProjection(seed, extra, options))}`;
+}
+
+export function createRenderOutputCacheKey(seed = {}, extra = {}, options = {}) {
+  return `render:${stableHash(createRenderSeedProjection(seed, extra, options))}`;
 }
 
 export function createMemoryFrameCacheStore(options = {}) {

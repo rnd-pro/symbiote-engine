@@ -77,9 +77,13 @@ export { createLocalBrowserScreencastProvider } from './providers/local-browser-
 export { createFileArtifactStore } from './artifacts.js';
 export { createAudioProviderJobQueue } from './provider-jobs.js';
 export {
+  RENDER_CACHE_PROJECTION_VERSION,
   createMemoryFrameCacheStore,
   createRenderFrameCacheKey,
+  createRenderOutputCacheKey,
+  createRenderSeedProjection,
   createRenderRetentionCleanup,
+  normalizeRenderSeed,
 } from './render-cache.js';
 export { createRenderJobCacheKey, createRenderProviderJobQueue } from './render-jobs.js';
 export { createLocalAudioTtsProvider } from './providers/local-audio-tts.js';

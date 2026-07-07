@@ -5,9 +5,13 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 
 import {
+  RENDER_CACHE_PROJECTION_VERSION,
   createMemoryFrameCacheStore,
   createRenderFrameCacheKey,
+  createRenderOutputCacheKey,
+  createRenderSeedProjection,
   createRenderRetentionCleanup,
+  normalizeRenderSeed,
 } from '../render-cache.js';
 
 async function exists(path) {
@@ -40,6 +44,15 @@ function baseSeed() {
     timelineHash: 'timeline-a',
     appBuild: 'build-a',
     dataHash: 'data-a',
+    providerSettings: {
+      audioProviderId: 'symbiote-model-service',
+      voiceRef: 'qwen3:speaker:vivian',
+      whisper: 'large-v3-turbo',
+    },
+    state: {
+      activeTabId: 'my-open-orders',
+      selectedWorkOrder: '1009',
+    },
   };
 }
 
@@ -49,6 +62,15 @@ test('render frame cache key is stable and invalidates by render seed dimensions
     dataHash: 'data-a',
     appBuild: 'build-a',
     timelineHash: 'timeline-a',
+    state: {
+      selectedWorkOrder: '1009',
+      activeTabId: 'my-open-orders',
+    },
+    providerSettings: {
+      whisper: 'large-v3-turbo',
+      voiceRef: 'qwen3:speaker:vivian',
+      audioProviderId: 'symbiote-model-service',
+    },
     video: { fps: 30, height: 360, width: 640 },
     viewport: { dpr: 2, height: 720, width: 1280 },
     theme: { hash: 'theme-a', id: 'cascade-dark' },
@@ -78,6 +100,101 @@ test('render frame cache key is stable and invalidates by render seed dimensions
   for (let patch of variants) {
     assert.notEqual(createRenderFrameCacheKey({ ...seed, ...patch }), key);
   }
+});
+
+test('render output and frame cache keys share the normalized seed identity', () => {
+  let seed = baseSeed();
+  let frameKey = createRenderFrameCacheKey(seed, { durationMs: 1000, frameCount: 30 });
+  let outputKey = createRenderOutputCacheKey(seed, {
+    includeAudio: true,
+    sequenceMode: 'sequential',
+    speakerMode: 'single',
+  });
+
+  assert.match(frameKey, /^frame:[a-f0-9]{32}$/);
+  assert.match(outputKey, /^render:[a-f0-9]{32}$/);
+  assert.equal(
+    createRenderOutputCacheKey({
+      dataHash: 'data-a',
+      appBuild: 'build-a',
+      timelineHash: 'timeline-a',
+      providerSettings: {
+        whisper: 'large-v3-turbo',
+        voiceRef: 'qwen3:speaker:vivian',
+        audioProviderId: 'symbiote-model-service',
+      },
+      state: {
+        selectedWorkOrder: '1009',
+        activeTabId: 'my-open-orders',
+      },
+      video: { fps: 30, height: 360, width: 640 },
+      viewport: { dpr: 2, height: 720, width: 1280 },
+      theme: { hash: 'theme-a', id: 'cascade-dark' },
+      surface: {
+        tab: 'my-open-orders',
+        id: 'maximo-live',
+        route: '/orders',
+        url: 'http://127.0.0.1:4570/',
+      },
+      providerId: 'browser-headless-screencast',
+    }, {
+      speakerMode: 'single',
+      sequenceMode: 'sequential',
+      includeAudio: true,
+    }),
+    outputKey,
+  );
+
+  for (let patch of [
+    { viewport: { width: 1280, height: 720, dpr: 1 } },
+    { surface: { ...seed.surface, route: '/orders?filter=crew-a' } },
+    { surface: { ...seed.surface, tab: 'crew-availability' } },
+    { dataHash: 'data-b' },
+    { providerSettings: { ...seed.providerSettings, voiceRef: 'qwen3:speaker:eric' } },
+    { cascadeTheme: { id: 'cascade-dark', hash: 'cascade-b' } },
+    { state: { activeTabId: 'my-open-orders', selectedWorkOrder: '1010' } },
+  ]) {
+    assert.notEqual(createRenderFrameCacheKey({ ...seed, ...patch }), frameKey);
+    assert.notEqual(createRenderOutputCacheKey({ ...seed, ...patch }), outputKey);
+  }
+});
+
+test('render seed projection is versioned and strips auth routing data', () => {
+  let seed = {
+    ...baseSeed(),
+    url: 'https://playground.rnd-pro.com/demos/maximo-workbench/?surface=orders&token=secret#token=also-secret',
+    internalBaseUrl: 'http://127.0.0.1:4570',
+    surface: {
+      ...baseSeed().surface,
+      url: 'https://playground.rnd-pro.com/demos/maximo-workbench/?surface=orders&access_token=secret#token=also-secret',
+    },
+  };
+  let projection = createRenderSeedProjection(seed);
+  let serialized = JSON.stringify(projection);
+
+  assert.equal(projection.version, RENDER_CACHE_PROJECTION_VERSION);
+  assert.equal(projection.source.url, 'https://playground.rnd-pro.com/demos/maximo-workbench/?surface=orders');
+  assert.equal(projection.source.route, '/orders');
+  assert.doesNotMatch(serialized, /secret|access_token|internalBaseUrl|127\.0\.0\.1:4570/);
+  assert.notEqual(
+    createRenderFrameCacheKey(baseSeed()),
+    createRenderFrameCacheKey(baseSeed(), {}, { version: RENDER_CACHE_PROJECTION_VERSION + 1 }),
+  );
+});
+
+test('render seed cache identity requires appBuild and dataHash', () => {
+  let seed = baseSeed();
+
+  assert.throws(
+    () => normalizeRenderSeed({ ...seed, appBuild: '', build: '', version: '', app: {} }),
+    /appBuild is required/,
+  );
+  assert.throws(
+    () => normalizeRenderSeed({ ...seed, dataHash: '', data: {} }),
+    /dataHash is required/,
+  );
+  assert.equal(normalizeRenderSeed({ ...seed, appBuild: '' }, { appBuild: 'server-build' }).appBuild, 'server-build');
+  assert.equal(normalizeRenderSeed({ ...seed, dataHash: '' }, { dataHash: 'server-data' }).dataHash, 'server-data');
 });
 
 test('memory frame cache store clones entries and tracks hits', async () => {
