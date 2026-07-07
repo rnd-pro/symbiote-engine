@@ -61,6 +61,7 @@ test('audio provider contract validates providers, jobs, voice refs, and artifac
       kind: 'tts',
       providerId: 'qwen3-local',
       profile: 'qwen3',
+      providerSettings: {},
       priority: 'batch',
       input: {
         text: 'Hola',
@@ -134,11 +135,16 @@ test('audio provider registry executes selected provider and protects kind bound
   );
 });
 
-test('audio cache keys include profile, model version, voice, text, language, and style', () => {
+test('audio cache keys include provider, settings, model, voice, text, language, and style', () => {
   let base = createAudioCacheKey({
     kind: 'tts',
+    providerId: 'local-qwen3',
     profile: 'qwen3',
     modelVersion: 'Qwen3-TTS-12Hz-1.7B-Base',
+    providerSettings: {
+      sampleRate: 24000,
+      speed: 1,
+    },
     input: {
       text: 'Hola',
       language: 'es',
@@ -149,8 +155,13 @@ test('audio cache keys include profile, model version, voice, text, language, an
 
   assert.equal(base, createAudioCacheKey({
     kind: 'tts',
+    providerId: 'local-qwen3',
     profile: 'qwen3',
     modelVersion: 'Qwen3-TTS-12Hz-1.7B-Base',
+    providerSettings: {
+      speed: 1,
+      sampleRate: 24000,
+    },
     input: {
       language: 'es',
       style: 'warm',
@@ -160,8 +171,13 @@ test('audio cache keys include profile, model version, voice, text, language, an
   }));
   assert.notEqual(base, createAudioCacheKey({
     kind: 'tts',
+    providerId: 'local-moss',
     profile: 'moss',
     modelVersion: 'MOSS-TTSD-v1.5',
+    providerSettings: {
+      sampleRate: 24000,
+      speed: 1,
+    },
     input: {
       text: 'Hola',
       language: 'es',
@@ -171,12 +187,33 @@ test('audio cache keys include profile, model version, voice, text, language, an
   }));
   assert.notEqual(base, createAudioCacheKey({
     kind: 'tts',
+    providerId: 'local-qwen3',
     profile: 'qwen3',
     modelVersion: 'Qwen3-TTS-12Hz-1.7B-Base',
+    providerSettings: {
+      sampleRate: 24000,
+      speed: 1,
+    },
     input: {
       text: 'Hola',
       language: 'es',
       voiceRef: 'voice:lucia-es-v1',
+      style: 'warm',
+    },
+  }));
+  assert.notEqual(base, createAudioCacheKey({
+    kind: 'tts',
+    providerId: 'local-qwen3',
+    profile: 'qwen3',
+    modelVersion: 'Qwen3-TTS-12Hz-1.7B-Base',
+    providerSettings: {
+      sampleRate: 48000,
+      speed: 1,
+    },
+    input: {
+      text: 'Hola',
+      language: 'es',
+      voiceRef: 'voice:mateo-es-v1',
       style: 'warm',
     },
   }));
@@ -304,6 +341,19 @@ test('provider job queue serializes per model class, idempotently caches, and ca
   assert.equal(cacheHit.status, 'succeeded');
   assert.equal(cacheHit.cacheHit, true);
   assert.equal(calls.length, 2);
+
+  let settingsVariant = await queue.submit({
+    id: 'first-settings-variant',
+    kind: 'tts',
+    providerId: 'qwen3-local',
+    profile: 'qwen3',
+    providerSettings: { sampleRate: 48000 },
+    input: { text: 'one', language: 'es', voiceRef: 'voice:a' },
+  });
+  await queue.drain();
+  assert.equal(queue.get(settingsVariant.jobId).status, 'succeeded');
+  assert.equal(settingsVariant.cacheHit, false);
+  assert.equal(calls.length, 3);
 });
 
 test('provider job queue times out running audio providers without caching artifacts', async () => {

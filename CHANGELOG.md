@@ -10,6 +10,9 @@
   HTTP provider.
 - Added audio provider queue timeouts that cover readiness waits and provider
   execution without caching timed-out artifacts.
+- Added provider id and provider settings dimensions to audio artifact cache
+  keys so local TTS/Whisper caches invalidate when provider configuration
+  changes.
 - Added render provider job queue and render cache helpers for provider-backed
   screencast jobs, deterministic frame cache keys, and retention cleanup.
 - Refactored `ai/tts` and `ai/whisper` packs to use injected audio provider

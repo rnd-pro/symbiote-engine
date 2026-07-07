@@ -166,6 +166,7 @@ export function normalizeAudioJob(job = {}) {
   let providerId = cleanString(job.providerId, job.audioProvider?.id);
   if (!providerId) fail('audioJob.providerId', 'is required');
   let input = requireObject(job.input || {}, 'audioJob.input');
+  let providerSettings = job.providerSettings === undefined ? {} : requireObject(job.providerSettings, 'audioJob.providerSettings');
   if (input.voiceRef) normalizeVoiceReference(input.voiceRef);
   if (input.voiceReference) normalizeVoiceReference(input.voiceReference);
   if (input.audioRef) normalizeArtifactId(input.audioRef, 'audioJob.input.audioRef');
@@ -176,6 +177,8 @@ export function normalizeAudioJob(job = {}) {
     providerId,
     ...(job.profile ? { profile: cleanString(job.profile, '') } : {}),
     ...(job.modelClass ? { modelClass: cleanString(job.modelClass, '') } : {}),
+    ...(job.modelVersion ? { modelVersion: cleanString(job.modelVersion, '') } : {}),
+    providerSettings: cloneJson(providerSettings),
     priority,
     input: cloneJson(input),
   };
@@ -201,7 +204,14 @@ export function normalizeAudioArtifact(result = {}) {
   return output;
 }
 
-export function createAudioCacheKey({ kind = 'tts', profile = '', modelVersion = '', input = {} } = {}) {
+export function createAudioCacheKey({
+  kind = 'tts',
+  providerId = '',
+  profile = '',
+  modelVersion = '',
+  providerSettings = {},
+  input = {},
+} = {}) {
   let normalizedKind = normalizeKind(kind, AUDIO_JOB_KINDS, 'tts', 'audioCache.kind');
   let normalizedInput = cloneJson(input);
   if (normalizedInput?.voiceRef) {
@@ -212,8 +222,10 @@ export function createAudioCacheKey({ kind = 'tts', profile = '', modelVersion =
   }
   return `audio:${stableHash({
     kind: normalizedKind,
+    providerId: cleanString(providerId, ''),
     profile: cleanString(profile, ''),
     modelVersion: cleanString(modelVersion, ''),
+    providerSettings: cloneJson(isObject(providerSettings) ? providerSettings : {}),
     input: normalizedInput,
   })}`;
 }

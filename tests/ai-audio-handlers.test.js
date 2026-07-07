@@ -78,15 +78,43 @@ test('ai/tts cache key uses audio cache key dimensions instead of mode or endpoi
   let key = ttsHandler.lifecycle.cacheKey(
     { text: 'Hola' },
     {
+      providerId: 'local-tts',
       profile: 'qwen3',
       modelVersion: 'Qwen3-TTS-12Hz-1.7B-Base',
       language: 'es',
       voiceRef: 'voice:mateo-es-v1',
       style: 'warm',
+      providerSettings: { sampleRate: 24000 },
+    },
+  );
+  let providerVariant = ttsHandler.lifecycle.cacheKey(
+    { text: 'Hola' },
+    {
+      providerId: 'other-local-tts',
+      profile: 'qwen3',
+      modelVersion: 'Qwen3-TTS-12Hz-1.7B-Base',
+      language: 'es',
+      voiceRef: 'voice:mateo-es-v1',
+      style: 'warm',
+      providerSettings: { sampleRate: 24000 },
+    },
+  );
+  let settingsVariant = ttsHandler.lifecycle.cacheKey(
+    { text: 'Hola' },
+    {
+      providerId: 'local-tts',
+      profile: 'qwen3',
+      modelVersion: 'Qwen3-TTS-12Hz-1.7B-Base',
+      language: 'es',
+      voiceRef: 'voice:mateo-es-v1',
+      style: 'warm',
+      providerSettings: { sampleRate: 48000 },
     },
   );
 
   assert.match(key, /^audio:/);
+  assert.notEqual(key, providerVariant);
+  assert.notEqual(key, settingsVariant);
   assert.doesNotMatch(key, /ssh|http|localhost|remote|endpoint/);
 });
 

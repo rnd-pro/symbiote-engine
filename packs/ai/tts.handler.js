@@ -112,8 +112,10 @@ export default {
 
     cacheKey: (inputs, params) => createAudioCacheKey({
       kind: 'tts',
+      providerId: params.providerId || DEFAULT_PROVIDER_ID,
       profile: params.profile || DEFAULT_PROFILE,
       modelVersion: params.modelVersion || '',
+      providerSettings: params.providerSettings || {},
       input: {
         text: inputs.text,
         language: params.language || 'es',
@@ -135,6 +137,7 @@ export default {
           profile: params.profile || DEFAULT_PROFILE,
           priority: params.priority || 'batch',
           modelVersion: params.modelVersion || '',
+          providerSettings: params.providerSettings || {},
           input: {
             text: inputs.text,
             language: params.language || 'es',

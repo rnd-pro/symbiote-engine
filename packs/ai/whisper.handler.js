@@ -115,8 +115,10 @@ export default {
 
     cacheKey: (inputs, params) => createAudioCacheKey({
       kind: 'transcribe',
+      providerId: params.providerId || DEFAULT_PROVIDER_ID,
       profile: params.profile || DEFAULT_PROFILE,
       modelVersion: params.modelVersion || params.model || '',
+      providerSettings: params.providerSettings || {},
       input: {
         audioRef: audioRefFromInputs(inputs),
         language: params.language || 'es',
@@ -135,6 +137,7 @@ export default {
           profile: params.profile || DEFAULT_PROFILE,
           priority: params.priority || 'batch',
           modelVersion: params.modelVersion || params.model || '',
+          providerSettings: params.providerSettings || {},
           input: {
             audioRef: audioRefFromInputs(inputs),
             language: params.language || 'es',

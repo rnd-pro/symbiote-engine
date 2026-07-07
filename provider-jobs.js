@@ -111,6 +111,7 @@ export function createAudioProviderJobQueue(options = {}) {
       providerId: record.providerId,
       profile: record.profile,
       modelClass: record.modelClass,
+      modelVersion: record.modelVersion,
       ...cloneJson(extra),
     };
     record.stage = event.stage;
@@ -204,6 +205,8 @@ export function createAudioProviderJobQueue(options = {}) {
       providerId: job.providerId,
       profile: job.profile || '',
       modelClass: job.modelClass || '',
+      modelVersion: job.modelVersion || '',
+      providerSettings: cloneJson(job.providerSettings || {}),
       priority: job.priority,
       input: cloneJson(job.input),
       cacheKey,
@@ -283,6 +286,8 @@ export function createAudioProviderJobQueue(options = {}) {
           providerId: record.providerId,
           profile: record.profile,
           modelClass: record.modelClass,
+          modelVersion: record.modelVersion,
+          providerSettings: cloneJson(record.providerSettings || {}),
           input: cloneJson(record.input),
         }));
         let current = records.get(record.jobId);
@@ -328,6 +333,8 @@ export function createAudioProviderJobQueue(options = {}) {
           providerId: record.providerId,
           profile: record.profile,
           modelClass: record.modelClass,
+          modelVersion: record.modelVersion,
+          providerSettings: cloneJson(record.providerSettings || {}),
           input: cloneJson(record.input),
         }, {
           signal: controller.signal,
@@ -395,10 +402,13 @@ export function createAudioProviderJobQueue(options = {}) {
       let job = normalizeAudioJob(request);
       let provider = typeof registry.get === 'function' ? registry.get(job.providerId) : null;
       if (provider && !job.modelClass) job.modelClass = provider.modelClass || provider.profile || provider.id;
+      if (provider && !job.modelVersion) job.modelVersion = provider.modelVersion || '';
       let cacheKey = cleanString(request.cacheKey, createAudioCacheKey({
         kind: job.kind,
+        providerId: job.providerId,
         profile: job.profile || '',
-        modelVersion: request.modelVersion || provider?.modelVersion || '',
+        modelVersion: job.modelVersion || '',
+        providerSettings: job.providerSettings || {},
         input: job.input,
       }));
       let cached = cache.get(cacheKey);
