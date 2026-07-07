@@ -6,11 +6,13 @@ import { test } from 'node:test';
 
 import {
   RENDER_CACHE_PROJECTION_VERSION,
+  buildRenderCleanupProofPatch,
   createMemoryFrameCacheStore,
   createRenderFrameCacheKey,
   createRenderOutputCacheKey,
   createRenderSeedProjection,
   createRenderRetentionCleanup,
+  didCleanupRemovePaths,
   normalizeRenderSeed,
 } from '../render-cache.js';
 
@@ -214,6 +216,44 @@ test('memory frame cache store clones entries and tracks hits', async () => {
   assert.equal(store.list()[0].hits, 2);
   assert.equal(await store.delete(key), true);
   assert.equal(await store.get(key), null);
+});
+
+test('cleanup proof helpers derive removed path evidence without throwing', () => {
+  let root = join(os.tmpdir(), 'sym-engine-cleanup-proof');
+  let scratch = join(root, 'frames');
+  let other = join(root, 'audio');
+
+  assert.equal(didCleanupRemovePaths(undefined, [scratch]), false);
+  assert.equal(didCleanupRemovePaths({ removed: null }, [scratch]), false);
+  assert.equal(didCleanupRemovePaths({ removed: [{ resolvedPath: scratch }] }, []), false);
+  assert.equal(didCleanupRemovePaths({ removed: [{ resolvedPath: other }] }, [scratch]), false);
+  assert.equal(didCleanupRemovePaths({ removed: [{ resolvedPath: scratch }] }, [scratch]), true);
+  assert.equal(didCleanupRemovePaths({ removed: [{ path: scratch }] }, [scratch]), true);
+});
+
+test('cleanup proof patch excludes retained frame cache paths', () => {
+  let root = join(os.tmpdir(), 'sym-engine-cleanup-patch');
+  let frameCache = join(root, 'frame-cache');
+  let scratch = join(root, 'jobs', 'frames');
+  let cleanup = { removed: [{ resolvedPath: scratch }] };
+
+  assert.deepEqual(buildRenderCleanupProofPatch({
+    cleanup,
+    frameScratchPaths: [frameCache],
+    retainedFramePaths: [frameCache],
+  }), {
+    frameSequenceCleaned: false,
+    cleanup,
+  });
+
+  assert.deepEqual(buildRenderCleanupProofPatch({
+    cleanup,
+    frameScratchPaths: [frameCache, scratch],
+    retainedFramePaths: [frameCache],
+  }), {
+    frameSequenceCleaned: true,
+    cleanup,
+  });
 });
 
 test('render retention cleanup deletes scratch paths and preserves final artifacts', async () => {

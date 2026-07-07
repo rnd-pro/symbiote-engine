@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  RENDER_PROOF_MANIFEST_STATE_FIELDS,
   buildAudioConcatArgs,
   buildAudioConcatListLine,
   buildAudioMuxArgs,
@@ -9,6 +10,7 @@ import {
   buildFrameSequenceEncodeArgs,
   buildRenderProofManifestProjection,
   parseFfprobeJson,
+  projectRenderProofManifestState,
 } from '../render-finalize.js';
 
 test('render finalize builds frame sequence x264 args with optional audio', () => {
@@ -172,4 +174,40 @@ test('render finalize projects neutral proof manifests without route or URL fiel
   assert.doesNotMatch(json, /\/tmp\//);
   assert.doesNotMatch(json, /route/);
   assert.doesNotMatch(json, /token/);
+});
+
+test('render finalize projects proof manifest state with a stable field set', () => {
+  let manifest = {
+    cacheKey: 'render:a',
+    frameCacheKey: 'frame:b',
+    renderSeed: { id: 'seed-a' },
+    renderSeedProjection: { version: 2 },
+    renderQueue: { id: 'queue-a' },
+    usesTrackDemoFrames: false,
+    frameSequenceCleaned: true,
+    visualFrame: { index: 0 },
+    audio: { durationMs: 1200 },
+    transcript: { artifactId: 'sha256:t' },
+    clipTranscripts: [{ itemIndex: 0 }],
+    captions: { cueCount: 1 },
+    output: { sha256: 'abc' },
+    avSync: { ok: true },
+    cleanup: { ok: true },
+    cleanupError: null,
+    progressTimeline: [{ stage: 'done' }],
+    stageDurations: [{ stage: 'encode:done' }],
+    ffprobe: { streams: [] },
+  };
+
+  let state = projectRenderProofManifestState(manifest);
+
+  assert.deepEqual(Object.keys(state), [...RENDER_PROOF_MANIFEST_STATE_FIELDS]);
+  assert.equal(state.ffprobe, undefined);
+  assert.equal(state.usesTrackDemoFrames, false);
+  assert.equal(state.cleanupError, null);
+  assert.deepEqual(projectRenderProofManifestState(manifest, ['cacheKey', 'output']), {
+    cacheKey: 'render:a',
+    output: { sha256: 'abc' },
+  });
+  assert.deepEqual(projectRenderProofManifestState(null, ['cacheKey']), { cacheKey: undefined });
 });

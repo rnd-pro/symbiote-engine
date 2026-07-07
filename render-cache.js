@@ -275,6 +275,33 @@ function resolveCleanupPath(path, root) {
   return resolve(isAbsolute(text) ? text : resolve(root, text));
 }
 
+function resolvedPathSet(paths = []) {
+  return new Set(arrayFrom(paths)
+    .map((path) => cleanString(path, ''))
+    .filter(Boolean)
+    .map((path) => resolve(path)));
+}
+
+export function didCleanupRemovePaths(cleanup = {}, paths = []) {
+  let targetPaths = resolvedPathSet(paths);
+  if (!targetPaths.size || !isObject(cleanup) || !Array.isArray(cleanup.removed)) return false;
+  return cleanup.removed.some((item) => {
+    let path = isObject(item) ? item.resolvedPath || item.path : item;
+    let text = cleanString(path, '');
+    return text ? targetPaths.has(resolve(text)) : false;
+  });
+}
+
+export function buildRenderCleanupProofPatch(options = {}) {
+  let frameScratchPaths = arrayFrom(options.frameScratchPaths);
+  let retainedFramePaths = arrayFrom(options.retainedFramePaths);
+  let scratchPaths = frameScratchPaths.filter((path) => !retainedFramePaths.includes(path));
+  return {
+    frameSequenceCleaned: scratchPaths.length > 0 && didCleanupRemovePaths(options.cleanup, scratchPaths),
+    cleanup: options.cleanup,
+  };
+}
+
 async function exists(path) {
   try {
     await stat(path);

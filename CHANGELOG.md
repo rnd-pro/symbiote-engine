@@ -15,11 +15,13 @@
   changes.
 - Added render provider job queue and render cache helpers for provider-backed
   screencast jobs, deterministic frame cache keys, and retention cleanup.
+- Added render cleanup proof evidence helpers for consumers that need to mirror
+  cleanup results into render proof state without parsing cleanup internals.
 - Added `render-captions` helpers for reusable Whisper caption cue attribution
   and VTT generation in provider-backed render pipelines.
 - Added `render-finalize` helpers for reusable frame-sequence encode args,
   audio concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest
-  projection.
+  projection/state helpers.
 - Added `render-lifecycle` helpers for reusable render event progress mapping,
   terminal job patches, queue snapshots, and stable render error taxonomy.
 - Added `render-proof` helpers for reusable ffprobe stream normalization,

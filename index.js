@@ -78,11 +78,13 @@ export { createFileArtifactStore } from './artifacts.js';
 export { createAudioProviderJobQueue } from './provider-jobs.js';
 export {
   RENDER_CACHE_PROJECTION_VERSION,
+  buildRenderCleanupProofPatch,
   createMemoryFrameCacheStore,
   createRenderFrameCacheKey,
   createRenderOutputCacheKey,
   createRenderSeedProjection,
   createRenderRetentionCleanup,
+  didCleanupRemovePaths,
   normalizeRenderSeed,
 } from './render-cache.js';
 export { createRenderJobCacheKey, createRenderProviderJobQueue } from './render-jobs.js';
@@ -97,6 +99,7 @@ export {
   renderVtt,
 } from './render-captions.js';
 export {
+  RENDER_PROOF_MANIFEST_STATE_FIELDS,
   buildAudioConcatArgs,
   buildAudioConcatListLine,
   buildAudioMuxArgs,
@@ -104,6 +107,7 @@ export {
   buildFrameSequenceEncodeArgs,
   buildRenderProofManifestProjection,
   parseFfprobeJson,
+  projectRenderProofManifestState,
 } from './render-finalize.js';
 export {
   buildRenderQueueSnapshot,

@@ -16,9 +16,13 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.createPersistenceAdapter, 'function');
   assert.equal(typeof engine.createRenderFrameCacheKey, 'function');
   assert.equal(typeof engine.createRenderRetentionCleanup, 'function');
+  assert.equal(typeof engine.buildRenderCleanupProofPatch, 'function');
+  assert.equal(typeof engine.didCleanupRemovePaths, 'function');
   assert.equal(typeof engine.buildFrameSequenceEncodeArgs, 'function');
   assert.equal(typeof engine.buildAudioConcatArgs, 'function');
   assert.equal(typeof engine.buildAudioOverlapMixArgs, 'function');
+  assert.ok(Array.isArray(engine.RENDER_PROOF_MANIFEST_STATE_FIELDS));
+  assert.equal(typeof engine.projectRenderProofManifestState, 'function');
   assert.equal(typeof engine.mapRenderEventToProgress, 'function');
   assert.equal(typeof engine.classifyRenderError, 'function');
   assert.equal(typeof engine.isTerminalRenderStatus, 'function');
@@ -50,6 +54,8 @@ test('render cache subpath imports in Node', async () => {
   assert.equal(typeof renderCache.createRenderFrameCacheKey, 'function');
   assert.equal(typeof renderCache.createMemoryFrameCacheStore, 'function');
   assert.equal(typeof renderCache.createRenderRetentionCleanup, 'function');
+  assert.equal(typeof renderCache.buildRenderCleanupProofPatch, 'function');
+  assert.equal(typeof renderCache.didCleanupRemovePaths, 'function');
 });
 
 test('render progress subpath imports in Node', async () => {
@@ -66,6 +72,7 @@ test('render finalize subpath imports in Node', async () => {
   assert.equal(typeof renderFinalize.buildAudioOverlapMixArgs, 'function');
   assert.equal(typeof renderFinalize.buildAudioMuxArgs, 'function');
   assert.equal(typeof renderFinalize.buildRenderProofManifestProjection, 'function');
+  assert.equal(typeof renderFinalize.projectRenderProofManifestState, 'function');
 });
 
 test('render lifecycle subpath imports in Node', async () => {

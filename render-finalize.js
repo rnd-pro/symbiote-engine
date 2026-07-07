@@ -29,6 +29,33 @@ function rawPath(value) {
   return String(value ?? '');
 }
 
+export const RENDER_PROOF_MANIFEST_STATE_FIELDS = Object.freeze([
+  'cacheKey',
+  'frameCacheKey',
+  'renderSeed',
+  'renderSeedProjection',
+  'renderQueue',
+  'usesTrackDemoFrames',
+  'frameSequenceCleaned',
+  'visualFrame',
+  'audio',
+  'transcript',
+  'clipTranscripts',
+  'captions',
+  'output',
+  'avSync',
+  'cleanup',
+  'cleanupError',
+  'progressTimeline',
+  'stageDurations',
+]);
+
+export function projectRenderProofManifestState(manifest = {}, fields = RENDER_PROOF_MANIFEST_STATE_FIELDS) {
+  let source = isObject(manifest) ? manifest : {};
+  let keys = Array.isArray(fields) && fields.length ? fields : RENDER_PROOF_MANIFEST_STATE_FIELDS;
+  return Object.fromEntries(keys.map((key) => [key, source[key]]));
+}
+
 export function buildFrameSequenceEncodeArgs(options = {}) {
   let {
     fps = 1,
