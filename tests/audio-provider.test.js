@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import { join } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 
 import {
@@ -303,6 +304,124 @@ test('provider job queue serializes per model class, idempotently caches, and ca
   assert.equal(cacheHit.status, 'succeeded');
   assert.equal(cacheHit.cacheHit, true);
   assert.equal(calls.length, 2);
+});
+
+test('provider job queue times out running audio providers without caching artifacts', async () => {
+  let events = [];
+  let calls = 0;
+  let aborted = false;
+  let registry = createAudioProviderRegistry([
+    {
+      id: 'qwen3-local',
+      kind: 'local-tts',
+      profile: 'qwen3',
+      execute: async (_job, context = {}) => {
+        calls += 1;
+        return new Promise((resolve, reject) => {
+          context.signal.addEventListener('abort', () => {
+            aborted = true;
+            reject(context.signal.reason);
+          }, { once: true });
+        });
+      },
+    },
+  ]);
+  let queue = createAudioProviderJobQueue({
+    registry,
+    timeoutMs: 10,
+    onEvent: (event) => events.push(event),
+  });
+
+  let submitted = await queue.submit({
+    id: 'timeout-running',
+    kind: 'tts',
+    providerId: 'qwen3-local',
+    profile: 'qwen3',
+    input: { text: 'slow', language: 'en', voiceRef: 'voice:a' },
+  });
+  let completed = await queue.wait(submitted.jobId);
+
+  assert.equal(completed.status, 'failed');
+  assert.equal(completed.timeout, true);
+  assert.equal(completed.error.code, 'TIMEOUT');
+  assert.equal(completed.result, undefined);
+  assert.equal(aborted, true);
+  assert.equal(calls, 1);
+  assert.ok(events.some((event) => event.type === 'audio-job:timeout' && event.stage === 'timeout'));
+  assert.ok(events.some((event) => event.type === 'audio-job:failed' && event.timeout === true));
+});
+
+test('provider job queue timeout covers readiness retry waits', async () => {
+  let events = [];
+  let executeCalls = 0;
+  let registry = createAudioProviderRegistry([
+    {
+      id: 'qwen3-local',
+      kind: 'local-tts',
+      profile: 'qwen3',
+      checkReady: async () => ({ ready: false, code: 'MODEL_LOADING', reason: 'still loading' }),
+      execute: async () => {
+        executeCalls += 1;
+        return {
+          artifactId: ARTIFACT_A,
+          mimeType: 'audio/wav',
+          durationSec: 1,
+          sampleRate: 24000,
+        };
+      },
+    },
+  ]);
+  let queue = createAudioProviderJobQueue({
+    registry,
+    readinessRetryMs: 1000,
+    timeoutMs: 20,
+    onEvent: (event) => events.push(event),
+  });
+
+  let submitted = await queue.submit({
+    id: 'timeout-readiness',
+    kind: 'tts',
+    providerId: 'qwen3-local',
+    profile: 'qwen3',
+    input: { text: 'waiting', language: 'en', voiceRef: 'voice:a' },
+  });
+  let completed = await queue.wait(submitted.jobId);
+
+  assert.equal(completed.status, 'failed');
+  assert.equal(completed.timeout, true);
+  assert.equal(completed.error.code, 'TIMEOUT');
+  assert.equal(executeCalls, 0);
+  assert.ok(events.some((event) => event.type === 'audio-job:not-ready'));
+  assert.ok(events.some((event) => event.type === 'audio-job:timeout' && event.stage === 'timeout'));
+});
+
+test('provider job queue keeps explicit running cancel distinct from timeout', async () => {
+  let registry = createAudioProviderRegistry([
+    {
+      id: 'qwen3-local',
+      kind: 'local-tts',
+      profile: 'qwen3',
+      execute: async (_job, context = {}) => new Promise((resolve, reject) => {
+        context.signal.addEventListener('abort', () => reject(context.signal.reason), { once: true });
+      }),
+    },
+  ]);
+  let queue = createAudioProviderJobQueue({ registry, timeoutMs: 1000 });
+
+  let submitted = await queue.submit({
+    id: 'cancel-running',
+    kind: 'tts',
+    providerId: 'qwen3-local',
+    profile: 'qwen3',
+    input: { text: 'cancel', language: 'en', voiceRef: 'voice:a' },
+  });
+  await delay(1);
+  await queue.cancel(submitted.jobId, 'operator canceled');
+  let completed = await queue.wait(submitted.jobId);
+
+  assert.equal(completed.status, 'canceled');
+  assert.equal(completed.timeout, undefined);
+  assert.equal(completed.cancelReason, 'operator canceled');
 });
 
 test('local audio TTS provider uses injected HTTP transport and stores engine artifacts', async () => {

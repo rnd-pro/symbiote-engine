@@ -20,6 +20,21 @@ function cleanString(value, fallback = '') {
   return text && text !== 'undefined' && text !== 'null' ? text : String(fallback || '').trim();
 }
 
+function timeoutError(timeoutMs) {
+  let error = new Error(`audio job timed out after ${timeoutMs}ms`);
+  error.code = 'TIMEOUT';
+  return error;
+}
+
+function errorFromAbort(signal) {
+  let reason = signal?.reason;
+  if (reason instanceof Error) return reason;
+  let error = new Error(cleanString(reason, 'audio job canceled') || 'audio job canceled');
+  error.name = 'AbortError';
+  error.code = 'ABORT_ERR';
+  return error;
+}
+
 function snapshot(record) {
   return cloneJson(record);
 }
@@ -36,6 +51,7 @@ function stageFor(type, extra = {}) {
   if (type === 'audio-job:progress') return cleanString(extra.progress?.stage, 'running');
   if (type === 'audio-job:artifact-write') return 'artifact-write';
   if (type === 'audio-job:cache-hit') return 'cache-hit';
+  if (type === 'audio-job:timeout') return 'timeout';
   if (type === 'audio-job:succeeded') return 'done';
   if (type === 'audio-job:failed') return 'failed';
   if (type === 'audio-job:canceled') return 'canceled';
@@ -65,12 +81,14 @@ export function createAudioProviderJobQueue(options = {}) {
   }
   let capacityByGroup = options.capacityByGroup || {};
   let readinessRetryMs = Math.max(0, Number(options.readinessRetryMs ?? DEFAULT_READINESS_RETRY_MS));
+  let defaultTimeoutMs = Math.max(0, Math.round(Number(options.timeoutMs ?? 0)));
   let eventHistoryLimit = Math.max(0, Math.round(Number(options.eventHistoryLimit ?? DEFAULT_EVENT_HISTORY_LIMIT)));
   let onEvent = typeof options.onEvent === 'function' ? options.onEvent : () => {};
   let records = new Map();
   let queue = [];
   let cache = new Map();
   let controllers = new Map();
+  let timeoutTimers = new Map();
   let running = new Set();
   let waiters = new Map();
   let readinessChecks = new Set();
@@ -78,6 +96,8 @@ export function createAudioProviderJobQueue(options = {}) {
   let retryTimers = new Map();
   let retryUntilByGroup = new Map();
   let activeByGroup = new Map();
+  let activeReleased = new Set();
+  let terminalEmitted = new Set();
 
   function rememberEvent(type, record, extra = {}) {
     let at = timestamp();
@@ -124,6 +144,53 @@ export function createAudioProviderJobQueue(options = {}) {
     let event = rememberEvent(type, record, extra);
     onEvent(cloneJson(event));
     resolveWaiters(record);
+  }
+
+  function clearRecordTimeout(record) {
+    let timer = timeoutTimers.get(record.jobId);
+    if (timer) clearTimeout(timer);
+    timeoutTimers.delete(record.jobId);
+  }
+
+  function releaseActive(record) {
+    if (!activeReleased.has(record.jobId)) {
+      setActive(activeByGroup, record.group, -1);
+      activeReleased.add(record.jobId);
+    }
+  }
+
+  function emitTerminal(type, record, extra = {}) {
+    if (terminalEmitted.has(record.jobId)) return;
+    terminalEmitted.add(record.jobId);
+    clearRecordTimeout(record);
+    emit(type, record, extra);
+  }
+
+  function removeQueued(jobId) {
+    let index = queue.indexOf(jobId);
+    if (index >= 0) queue.splice(index, 1);
+  }
+
+  function timeoutRecord(record, error = timeoutError(record.timeoutMs || defaultTimeoutMs)) {
+    if (!record || TERMINAL_STATUSES.has(record.status)) return;
+    record.timeout = true;
+    record.error = { message: error?.message || String(error), code: 'TIMEOUT' };
+    let controller = controllers.get(record.jobId);
+    if (controller && !controller.signal.aborted) controller.abort(error);
+    removeQueued(record.jobId);
+    if (record.status === 'running') releaseActive(record);
+    controllers.delete(record.jobId);
+    emit('audio-job:timeout', record, { error: record.error });
+    record.status = 'failed';
+    emitTerminal('audio-job:failed', record, { timeout: true });
+    pump();
+  }
+
+  function armTimeout(record) {
+    let timeoutMs = Math.max(0, Math.round(Number(record.timeoutMs || 0)));
+    if (timeoutMs <= 0 || timeoutTimers.has(record.jobId)) return;
+    let timer = setTimeout(() => timeoutRecord(record), timeoutMs);
+    timeoutTimers.set(record.jobId, timer);
   }
 
   function recordFor(job, cacheKey) {
@@ -245,8 +312,10 @@ export function createAudioProviderJobQueue(options = {}) {
   function start(record) {
     let index = queue.indexOf(record.jobId);
     if (index >= 0) queue.splice(index, 1);
+    if (TERMINAL_STATUSES.has(record.status)) return;
     let controller = new AbortController();
     controllers.set(record.jobId, controller);
+    activeReleased.delete(record.jobId);
     setActive(activeByGroup, record.group, 1);
     record.status = 'running';
     emit('audio-job:running', record);
@@ -266,9 +335,13 @@ export function createAudioProviderJobQueue(options = {}) {
             emit('audio-job:progress', record, { progress });
           },
         });
-        if (controller.signal.aborted) {
+        if (TERMINAL_STATUSES.has(record.status)) {
+          return snapshot(record);
+        }
+        if (record.timeout || controller.signal.aborted) {
+          if (record.timeout) throw timeoutError(record.timeoutMs || defaultTimeoutMs);
           record.status = 'canceled';
-          record.cancelReason = controller.signal.reason || 'aborted';
+          record.cancelReason = errorFromAbort(controller.signal).message;
         } else {
           emit('audio-job:artifact-write', record, {
             artifact: result?.artifactId ? {
@@ -282,7 +355,16 @@ export function createAudioProviderJobQueue(options = {}) {
           cache.set(record.cacheKey, cloneJson(result));
         }
       } catch (err) {
-        if (!controller.signal.aborted && isAudioProviderNotReadyError(err)) {
+        if (TERMINAL_STATUSES.has(record.status)) {
+          return snapshot(record);
+        }
+        let timedOut = record.timeout || err?.code === 'TIMEOUT';
+        if (timedOut) {
+          record.timeout = true;
+          record.error = { message: err?.message || timeoutError(record.timeoutMs || defaultTimeoutMs).message, code: 'TIMEOUT' };
+          emit('audio-job:timeout', record, { error: record.error });
+          record.status = 'failed';
+        } else if (!controller.signal.aborted && isAudioProviderNotReadyError(err)) {
           notReadyRecord(record, err.readiness || {
             ready: false,
             code: err?.code || 'NOT_READY',
@@ -290,12 +372,15 @@ export function createAudioProviderJobQueue(options = {}) {
           });
         } else {
           record.status = controller.signal.aborted ? 'canceled' : 'failed';
-          record.error = { message: err?.message || String(err), code: err?.code };
+          if (record.status === 'canceled') record.cancelReason = errorFromAbort(controller.signal).message;
+          else record.error = { message: err?.message || String(err), code: err?.code };
         }
       } finally {
         controllers.delete(record.jobId);
-        setActive(activeByGroup, record.group, -1);
-        if (record.status !== 'queued') emit(`audio-job:${record.status}`, record);
+        releaseActive(record);
+        if (TERMINAL_STATUSES.has(record.status)) {
+          emitTerminal(`audio-job:${record.status}`, record, record.timeout ? { timeout: true } : {});
+        }
         pump();
       }
       return snapshot(record);
@@ -334,11 +419,13 @@ export function createAudioProviderJobQueue(options = {}) {
         };
       }
       let record = recordFor(job, cacheKey);
+      record.timeoutMs = Math.max(0, Math.round(Number(request.timeoutMs ?? defaultTimeoutMs)));
       let existing = records.get(record.jobId);
       if (existing) return { ...snapshot(existing), idempotent: true };
 
       records.set(record.jobId, record);
       emit('audio-job:accepted', record);
+      armTimeout(record);
       insertQueued(record.jobId, record.priority);
       emit('audio-job:queued', record);
       pump();
@@ -352,13 +439,12 @@ export function createAudioProviderJobQueue(options = {}) {
       let record = records.get(jobId);
       if (!record) throw new Error(`audio job "${jobId}" does not exist`);
       if (TERMINAL_STATUSES.has(record.status)) return snapshot(record);
-      let index = queue.indexOf(jobId);
-      if (index >= 0) queue.splice(index, 1);
+      removeQueued(jobId);
       let controller = controllers.get(jobId);
       if (controller && !controller.signal.aborted) controller.abort(reason);
       record.status = 'canceled';
       record.cancelReason = reason;
-      emit('audio-job:canceled', record);
+      emitTerminal('audio-job:canceled', record);
       return snapshot(record);
     },
     wait(jobId) {
