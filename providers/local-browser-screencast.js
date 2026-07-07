@@ -498,7 +498,13 @@ export function createLocalBrowserScreencastProvider(options = {}) {
             type: action.type,
             label: actionProgressLabel(action),
           });
-          await withAbort(executeAction(page, action, log), signal);
+          try {
+            await withAbort(executeAction(page, action, log), signal);
+          } catch (error) {
+            let wrapped = new Error(`setup action ${index} (${actionProgressLabel(action)}) failed: ${error?.message || error}`);
+            wrapped.cause = error;
+            throw wrapped;
+          }
           emitStage(executionOptions, 'setup-action:done', {
             index,
             type: action.type,

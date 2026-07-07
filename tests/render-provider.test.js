@@ -619,3 +619,50 @@ test('local browser screencast provider can call live page methods and capture s
   assert.equal(state.samples[0].state.caption.text, 'Live caption');
   assert.equal(closed, true);
 });
+
+test('local browser screencast provider labels setup action failures', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-render-provider-setup-error-'));
+  let closed = false;
+  let page = {
+    async setViewport() {},
+    async goto() {},
+    async waitForFunction() {
+      throw new Error('not ready');
+    },
+  };
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        return {
+          async newPage() { return page; },
+          async close() { closed = true; },
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+
+  await assert.rejects(
+    () => provider.execute({
+      id: 'setup-error-unit',
+      output: { path: 'out/unit.mp4' },
+      surface: { url: 'http://example.test/' },
+      video: {
+        width: 320,
+        height: 180,
+        fps: 1,
+        durationMs: 1000,
+        frameCount: 1,
+      },
+      setup: [
+        { type: 'waitForWindowPredicate', path: '__maximoTourRender.ready' },
+      ],
+      timeline: [],
+      captions: { enabled: false, cues: [] },
+    }),
+    /setup action 0 \(waitForWindowPredicate:__maximoTourRender\.ready\) failed: not ready/,
+  );
+  assert.equal(closed, true);
+});
