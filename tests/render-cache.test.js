@@ -221,6 +221,9 @@ test('render retention cleanup deletes scratch paths and preserves final artifac
   let framesDir = join(root, 'tmp', 'frames');
   let audioChunk = join(root, 'tmp', 'audio', 'chunk.wav');
   let whisperScratch = join(root, 'tmp', 'whisper.json');
+  let browserProfile = join(root, 'tmp', 'browser-profile');
+  let workerTemp = join(root, 'tmp', 'worker');
+  let providerTemp = join(root, 'tmp', 'provider');
   let finalMp4 = join(root, 'final', 'render.mp4');
   let proof = join(root, 'proof', 'manifest.json');
   let reusableCache = join(root, 'cache', 'audio.wav');
@@ -229,6 +232,9 @@ test('render retention cleanup deletes scratch paths and preserves final artifac
   await writeFixture(join(framesDir, 'frame-00001.png'));
   await writeFixture(audioChunk);
   await writeFixture(whisperScratch);
+  await writeFixture(join(browserProfile, 'Preferences'), '{}');
+  await writeFixture(join(workerTemp, 'worker.tmp'), 'tmp');
+  await writeFixture(join(providerTemp, 'provider.tmp'), 'tmp');
   await writeFixture(finalMp4);
   await writeFixture(proof, '{}');
   await writeFixture(reusableCache);
@@ -241,6 +247,9 @@ test('render retention cleanup deletes scratch paths and preserves final artifac
         frameSequencePaths: ['tmp/frames'],
         audioChunkPaths: ['tmp/audio/chunk.wav'],
         transcriptScratchPaths: ['tmp/whisper.json'],
+        browserProfilePaths: ['tmp/browser-profile'],
+        workerTempPaths: ['tmp/worker'],
+        providerTempPaths: ['tmp/provider'],
         reusableCachePaths: ['cache/audio.wav'],
       },
     },
@@ -259,6 +268,9 @@ test('render retention cleanup deletes scratch paths and preserves final artifac
   assert.equal(await exists(framesDir), false);
   assert.equal(await exists(audioChunk), false);
   assert.equal(await exists(whisperScratch), false);
+  assert.equal(await exists(browserProfile), false);
+  assert.equal(await exists(workerTemp), false);
+  assert.equal(await exists(providerTemp), false);
   assert.equal(await exists(finalMp4), true);
   assert.equal(await exists(proof), true);
   assert.equal(await exists(reusableCache), true);
