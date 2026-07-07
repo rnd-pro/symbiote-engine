@@ -19,6 +19,8 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.buildFrameSequenceEncodeArgs, 'function');
   assert.equal(typeof engine.buildAudioConcatArgs, 'function');
   assert.equal(typeof engine.buildAudioOverlapMixArgs, 'function');
+  assert.equal(typeof engine.mapRenderEventToProgress, 'function');
+  assert.equal(typeof engine.classifyRenderError, 'function');
   assert.equal(typeof engine.buildRenderAudioLayerProof, 'function');
   assert.equal(typeof engine.buildRenderAvSyncProof, 'function');
   assert.equal(typeof engine.createStageProgressTracker, 'function');
@@ -61,6 +63,14 @@ test('render finalize subpath imports in Node', async () => {
   assert.equal(typeof renderFinalize.buildAudioOverlapMixArgs, 'function');
   assert.equal(typeof renderFinalize.buildAudioMuxArgs, 'function');
   assert.equal(typeof renderFinalize.buildRenderProofManifestProjection, 'function');
+});
+
+test('render lifecycle subpath imports in Node', async () => {
+  let renderLifecycle = await import('symbiote-engine/render-lifecycle');
+
+  assert.equal(typeof renderLifecycle.mapRenderEventToProgress, 'function');
+  assert.equal(typeof renderLifecycle.classifyRenderError, 'function');
+  assert.equal(typeof renderLifecycle.isRenderTimeout, 'function');
 });
 
 test('render proof subpath imports in Node', async () => {

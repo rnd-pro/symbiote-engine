@@ -19,6 +19,7 @@
     "./render-cache": "./render-cache.js",
     "./render-captions": "./render-captions.js",
     "./render-finalize": "./render-finalize.js",
+    "./render-lifecycle": "./render-lifecycle.js",
     "./render-proof": "./render-proof.js",
     "./render-progress": "./render-progress.js",
     "./render-jobs": "./render-jobs.js",

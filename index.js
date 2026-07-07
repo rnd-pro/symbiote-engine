@@ -106,6 +106,11 @@ export {
   parseFfprobeJson,
 } from './render-finalize.js';
 export {
+  classifyRenderError,
+  isRenderTimeout,
+  mapRenderEventToProgress,
+} from './render-lifecycle.js';
+export {
   buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
   countClipOverlaps,
