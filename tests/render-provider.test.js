@@ -421,6 +421,68 @@ test('local browser screencast provider can return a frame-sequence artifact wit
   assert.equal(stages.includes('encode:start'), false);
 });
 
+test('local browser screencast provider supports WebP frame-sequence capture', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-webp-frame-sequence-'));
+  let progress = [];
+  let screenshotOptions = [];
+  let page = {
+    mouse: { click: async () => {} },
+    async setViewport(viewport) {
+      this.viewport = viewport;
+    },
+    async goto(url) {
+      this.url = url;
+    },
+    async screenshot(options) {
+      screenshotOptions.push(options);
+    },
+  };
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        return {
+          async newPage() { return page; },
+          async close() {},
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+
+  let result = await provider.execute({
+    id: 'webp-sequence-unit',
+    frameFormat: 'webp',
+    surface: { url: 'http://example.test/webp' },
+    video: {
+      width: 320,
+      height: 180,
+      fps: 1000,
+      durationMs: 2,
+      frameCount: 2,
+    },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+  }, {
+    artifactKind: 'frame-sequence',
+    onProgress(event) {
+      progress.push(event);
+    },
+  });
+
+  assert.equal(result.framePattern, 'frame-%05d.webp');
+  assert.equal(result.mimeType, 'image/webp');
+  assert.deepEqual(result.frameFiles.map((frame) => frame.mimeType), ['image/webp', 'image/webp']);
+  assert.deepEqual(screenshotOptions.map((options) => options.type), ['webp', 'webp']);
+  assert.deepEqual(screenshotOptions.map((options) => options.path.endsWith('.webp')), [true, true]);
+  assert.deepEqual(progress.map((event) => [event.framePattern, event.mimeType]), [
+    ['frame-%05d.webp', 'image/webp'],
+    ['frame-%05d.webp', 'image/webp'],
+  ]);
+});
+
 test('local browser screencast provider waits for document fonts before capture', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-font-readiness-'));
   let stageOrder = [];
@@ -550,6 +612,7 @@ test('local browser screencast provider aborts capture and closes browser', asyn
 
 test('local browser screencast provider can call live page methods and capture state', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-render-provider-state-'));
+  let selectorCalls = [];
   let waitCalls = [];
   let evaluateCalls = [];
   let closed = false;
@@ -560,6 +623,9 @@ test('local browser screencast provider can call live page methods and capture s
     },
     async goto(url) {
       this.url = url;
+    },
+    async waitForSelector(selector, options) {
+      selectorCalls.push({ selector, options });
     },
     async waitForFunction(_fn, _options, parts) {
       waitCalls.push(parts);
@@ -599,6 +665,7 @@ test('local browser screencast provider can call live page methods and capture s
       frameCount: 1,
     },
     setup: [
+      { type: 'waitForSelector', selector: '[data-tab-id="orders-tab"]', state: 'attached', timeoutMs: 12000 },
       { type: 'waitForWindowPredicate', path: '__maximoTourRender.ready' },
       { type: 'waitForWindowMethod', path: '__maximoTourRender.playProviderTour' },
       {
@@ -619,6 +686,9 @@ test('local browser screencast provider can call live page methods and capture s
 
   let state = JSON.parse(await readFile(join(tmp, 'out/state.json'), 'utf8'));
   assert.equal(page.url, 'http://example.test/');
+  assert.deepEqual(selectorCalls, [
+    { selector: '[data-tab-id="orders-tab"]', options: { timeout: 12000, state: 'attached' } },
+  ]);
   assert.deepEqual(waitCalls, [
     ['__maximoTourRender', 'ready'],
     ['__maximoTourRender', 'playProviderTour'],

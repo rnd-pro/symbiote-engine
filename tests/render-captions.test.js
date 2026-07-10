@@ -3,12 +3,14 @@ import { test } from 'node:test';
 
 import {
   buildCaptionCues,
+  captionCueHasWordTimings,
   captionAttributionForRange,
   captionCuesFromClipTranscripts,
   captionCuesFromTranscript,
   captionTranscriptDurationSec,
   captionWordTimeSeconds,
   overlapMs,
+  renderAss,
   renderVtt,
 } from '../render-captions.js';
 
@@ -49,6 +51,8 @@ test('caption transcript cues group by speaker, max words, gaps, and sentence br
   ]);
   assert.deepEqual(result.map((cue) => cue.speaker), ['guide', 'guide', 'guide', 'ops', 'ops']);
   assert.equal(result[0].attributionSource, 'range-map');
+  assert.deepEqual(result[0].wordTimings[0], { text: 'one', startSec: 0, endSec: 0.2 });
+  assert.equal(captionCueHasWordTimings(result[0]), true);
 });
 
 test('caption transcript cues fall back to transcript text when words are missing', () => {
@@ -59,6 +63,7 @@ test('caption transcript cues fall back to transcript text when words are missin
 
   assert.equal(result.length, 1);
   assert.equal(result[0].words.join(' '), 'hello fallback');
+  assert.equal(captionCueHasWordTimings(result[0]), false);
   assert.equal(result[0].endSec, 2.5);
   assert.equal(result[0].speaker, 'guide');
 });
@@ -79,6 +84,8 @@ test('caption clip transcripts sort across clips and preserve speaker attributio
 
   assert.deepEqual(result.map((cue) => cue.words.join(' ')), ['first phrase.', 'after', 'second']);
   assert.deepEqual(result.map((cue) => cue.speaker), ['guide', 'guide', 'ops']);
+  assert.deepEqual(result[0].wordTimings.map((item) => item.text), ['first', 'phrase.']);
+  assert.equal(result[2].wordTimings[0].startSec, 2);
   assert.equal(result.every((cue) => cue.attributionSource === 'clip-transcript'), true);
 });
 
@@ -130,9 +137,56 @@ test('caption helpers expose duration, word time, and caption build source', () 
   assert.equal(captionTranscriptDurationSec({ words: [word('a', 0, 0.5), word('b', 1, 1.75)] }), 1.75);
 
   let built = buildCaptionCues({
-    sequenceMode: 'overlap',
+    sequenceMode: 'sequential',
     clipTranscripts: [{ speaker: 'guide', words: [word('hello', 0, 0.2)] }],
   });
   assert.equal(built.source, 'whisper+clip-range-map');
   assert.match(built.vtt, /^WEBVTT\n\n1\n00:00:00\.000 --> 00:00:00\.200\nhello\n\n$/);
+  assert.match(built.ass, /Dialogue: 0,0:00:00\.00,0:00:00\.20,TikTok/);
+  assert.match(built.ass, /\\k20\}hello/);
+});
+
+test('caption build uses timed clip transcripts before transcript text fallbacks', () => {
+  let built = buildCaptionCues({
+    transcript: { text: 'fallback transcript without timed words', durationSec: 3 },
+    clipTranscripts: [
+      { speaker: 'guide', cueIndex: 0, words: [word('timed', 1, 1.25), word('clip', 1.3, 1.55)] },
+    ],
+  });
+
+  assert.equal(built.source, 'whisper+clip-range-map');
+  assert.equal(built.cues.length, 1);
+  assert.equal(built.cues[0].words.join(' '), 'timed clip');
+  assert.equal(captionCueHasWordTimings(built.cues[0]), true);
+  assert.match(built.ass, /\\k25\}timed/);
+});
+
+test('renderAss emits karaoke timings and escapes unsafe text', () => {
+  let ass = renderAss([
+    {
+      startSec: 1,
+      endSec: 2,
+      speaker: 'guide',
+      words: ['A{bad}', 'word'],
+      wordTimings: [
+        { text: 'A{bad}', startSec: 1, endSec: 1.25 },
+        { text: 'word', startSec: 1.25, endSec: 1.8 },
+      ],
+    },
+    {
+      startSec: 2.2,
+      endSec: 2.8,
+      speaker: 'ops',
+      words: ['whole line'],
+      wordTimings: [],
+    },
+  ], { captionStyle: { preset: 'tiktok', fontSize: 30, highlightColor: '#ffff00' } });
+
+  assert.match(ass, /Style: TikTok,Arial,30/);
+  assert.match(ass, /Dialogue: 0,0:00:01\.00,0:00:02\.00,TikTok,guide/);
+  assert.match(ass, /\\k25\}A bad/);
+  assert.match(ass, /\\k55\}word/);
+  assert.match(ass, /Dialogue: 0,0:00:02\.20,0:00:02\.80,TikTok,ops/);
+  assert.doesNotMatch(ass, /A\{bad\}/);
+  assert.equal(renderAss([{ startSec: 0, endSec: 1, words: ['plain'], wordTimings: [] }]), '');
 });

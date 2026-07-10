@@ -1,4 +1,5 @@
 import { cleanString, finiteNonNegativeNumber, finitePositiveNumber, isObject } from './render-utils.js';
+import { resolveCaptionStyle } from './render-captions.js';
 
 function compact(value) {
   if (Array.isArray(value)) {
@@ -25,8 +26,39 @@ function optionalNonNegativeNumber(value) {
   return finiteNonNegativeNumber(value, null);
 }
 
+function escapeFfmpegFilterValue(value) {
+  return String(value ?? '')
+    .replace(/\\/g, '\\\\')
+    .replace(/:/g, '\\:')
+    .replace(/,/g, '\\,')
+    .replace(/\[/g, '\\[')
+    .replace(/\]/g, '\\]')
+    .replace(/'/g, "\\'");
+}
+
 function rawPath(value) {
   return String(value ?? '');
+}
+
+export function buildCaptionOverlayFilter(options = {}) {
+  let captionsPath = rawPath(options.captionsPath || options.path);
+  if (!captionsPath) return '';
+  if (/\.ass$/i.test(captionsPath)) return `subtitles=${escapeFfmpegFilterValue(captionsPath)}`;
+  let style = resolveCaptionStyle(isObject(options.captionStyle) ? options.captionStyle : { preset: options.preset });
+  let forceStyle = [
+    `Fontname=${style.fontName}`,
+    `Fontsize=${Math.round(finitePositiveNumber(style.fontSize, 24))}`,
+    `PrimaryColour=${style.primaryColor}`,
+    `OutlineColour=${style.outlineColor}`,
+    `BackColour=${style.backColor}`,
+    'BorderStyle=3',
+    'Outline=1',
+    'Shadow=1',
+    'Alignment=2',
+    `MarginV=${Math.round(finiteNonNegativeNumber(style.marginV, 70))}`,
+    'Bold=1',
+  ].join(',');
+  return `subtitles=${escapeFfmpegFilterValue(captionsPath)}:force_style='${escapeFfmpegFilterValue(forceStyle)}'`;
 }
 
 export const RENDER_PROOF_MANIFEST_STATE_FIELDS = Object.freeze([
@@ -70,6 +102,9 @@ export function buildFrameSequenceEncodeArgs(options = {}) {
     crf = '18',
     pixelFormat = 'yuv420p',
     scaleFilter = '',
+    captionsPath = '',
+    captionsBurnPath = '',
+    captionStyle = {},
     audioCodec = 'aac',
     audioBitrate = '192k',
   } = options || {};
@@ -100,7 +135,11 @@ export function buildFrameSequenceEncodeArgs(options = {}) {
   if (!resolvedScaleFilter && safeWidth > 0 && safeHeight > 0) {
     resolvedScaleFilter = `scale=${Math.round(safeWidth)}:${Math.round(safeHeight)}`;
   }
-  if (resolvedScaleFilter) args.push('-vf', resolvedScaleFilter);
+  let filters = [
+    resolvedScaleFilter,
+    buildCaptionOverlayFilter({ captionsPath: captionsBurnPath || captionsPath, captionStyle }),
+  ].filter(Boolean);
+  if (filters.length) args.push('-vf', filters.join(','));
   if (safeAudioPath) {
     args.push('-c:a', codecValue(audioCodec, 'aac'), '-b:a', codecValue(audioBitrate, '192k'));
   }

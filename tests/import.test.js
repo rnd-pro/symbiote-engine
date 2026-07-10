@@ -1,6 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
+
+async function listSourceFiles(rootUrl) {
+  let entries = await readdir(rootUrl, { withFileTypes: true });
+  let files = [];
+  for (let entry of entries) {
+    if (entry.name === 'node_modules' || entry.name === 'tmp' || entry.name.startsWith('.git')) continue;
+    let url = new URL(`${entry.name}${entry.isDirectory() ? '/' : ''}`, rootUrl);
+    if (entry.isDirectory()) {
+      files.push(...await listSourceFiles(url));
+    } else if (entry.name.endsWith('.js')) {
+      files.push(url);
+    }
+  }
+  return files;
+}
 
 test('root engine API imports in Node', async () => {
   let engine = await import('../index.js');
@@ -88,6 +103,16 @@ test('render lifecycle subpath imports in Node', async () => {
   assert.equal(typeof renderLifecycle.buildRenderQueueSnapshot, 'function');
   assert.equal(typeof renderLifecycle.createRenderCanceledError, 'function');
   assert.equal(typeof renderLifecycle.createRenderTimeoutError, 'function');
+});
+
+test('engine sources do not import symbiote-workspace', async () => {
+  let files = await listSourceFiles(new URL('../', import.meta.url));
+
+  for (let file of files) {
+    let source = await readFile(file, 'utf8');
+    assert.doesNotMatch(source, /from ['"]symbiote-workspace(?:\/|['"])/, file.pathname);
+    assert.doesNotMatch(source, /import\(['"]symbiote-workspace(?:\/|['"])/, file.pathname);
+  }
 });
 
 test('render proof subpath imports in Node', async () => {

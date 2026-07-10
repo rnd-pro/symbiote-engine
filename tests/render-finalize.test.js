@@ -7,6 +7,7 @@ import {
   buildAudioConcatListLine,
   buildAudioMuxArgs,
   buildAudioOverlapMixArgs,
+  buildCaptionOverlayFilter,
   buildFrameSequenceEncodeArgs,
   buildRenderProofManifestProjection,
   parseFfprobeJson,
@@ -60,6 +61,52 @@ test('render finalize builds frame sequence x264 args with optional audio', () =
       'silent.mp4',
     ],
   );
+});
+
+test('render finalize builds reusable caption overlay filters for final video', () => {
+  let filter = buildCaptionOverlayFilter({
+    captionsPath: "/cache/captions/tour:one.vtt",
+    captionStyle: { preset: 'tiktok', fontSize: 28, marginV: 80 },
+  });
+
+  assert.match(filter, /^subtitles=\/cache\/captions\/tour\\:one\.vtt:force_style='/);
+  assert.match(filter, /Fontsize=28/);
+  assert.match(filter, /MarginV=80/);
+  assert.equal(buildCaptionOverlayFilter({}), '');
+  let assFilter = buildCaptionOverlayFilter({
+    captionsPath: '/cache/captions/render.ass',
+    captionStyle: { preset: 'tiktok', fontSize: 28, marginV: 80 },
+  });
+  assert.equal(assFilter, 'subtitles=/cache/captions/render.ass');
+  assert.doesNotMatch(assFilter, /force_style/);
+
+  let args = buildFrameSequenceEncodeArgs({
+    fps: 12,
+    frameInput: '/cache/frames/frame-%05d.png',
+    captionsPath: '/cache/captions/render.vtt',
+    captionStyle: { preset: 'tiktok' },
+    width: 1280,
+    height: 720,
+    outputPath: '/cache/render.mp4',
+  });
+
+  let vfIndex = args.indexOf('-vf');
+  assert.notEqual(vfIndex, -1);
+  assert.match(args[vfIndex + 1], /^scale=1280:720,subtitles=\/cache\/captions\/render\.vtt/);
+  assert.match(args[vfIndex + 1], /force_style='/);
+
+  let assArgs = buildFrameSequenceEncodeArgs({
+    fps: 12,
+    frameInput: '/cache/frames/frame-%05d.png',
+    captionsPath: '/cache/captions/render.vtt',
+    captionsBurnPath: '/cache/captions/render.ass',
+    width: 1280,
+    height: 720,
+    outputPath: '/cache/render.mp4',
+  });
+  let assVfIndex = assArgs.indexOf('-vf');
+  assert.notEqual(assVfIndex, -1);
+  assert.equal(assArgs[assVfIndex + 1], 'scale=1280:720,subtitles=/cache/captions/render.ass');
 });
 
 test('render finalize builds concat demuxer audio args and list lines', () => {

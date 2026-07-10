@@ -91,12 +91,15 @@ export { createRenderJobCacheKey, createRenderProviderJobQueue } from './render-
 export {
   buildCaptionCues,
   captionAttributionForRange,
+  captionCueHasWordTimings,
   captionCuesFromClipTranscripts,
   captionCuesFromTranscript,
   captionTranscriptDurationSec,
   captionWordTimeSeconds,
   overlapMs,
+  renderAss,
   renderVtt,
+  resolveCaptionStyle,
 } from './render-captions.js';
 export {
   RENDER_PROOF_MANIFEST_STATE_FIELDS,

@@ -66,6 +66,22 @@ function cleanString(value, fallback = '') {
   return text && text !== 'undefined' && text !== 'null' ? text : String(fallback || '').trim();
 }
 
+function cleanFrameFormat(value, fallback = 'png') {
+  let text = cleanString(value, fallback).toLowerCase();
+  if (text === 'jpg') return 'jpeg';
+  return ['png', 'jpeg', 'webp'].includes(text) ? text : fallback;
+}
+
+function frameFormatExtension(format) {
+  return format === 'jpeg' ? 'jpg' : format;
+}
+
+function frameFormatMimeType(format) {
+  if (format === 'jpeg') return 'image/jpeg';
+  if (format === 'webp') return 'image/webp';
+  return 'image/png';
+}
+
 function positiveNumber(value, fallback, path) {
   let number = Number(value ?? fallback);
   if (!Number.isFinite(number) || number <= 0) {
@@ -268,7 +284,10 @@ async function executeAction(page, action, log) {
   }
   if (action.type === 'waitForSelector') {
     log(`wait selector: ${action.selector}`);
-    await page.waitForSelector(action.selector, { timeout: action.timeoutMs || 10000 });
+    await page.waitForSelector(action.selector, {
+      timeout: action.timeoutMs || 10000,
+      state: selectorWaitState(action.state),
+    });
     return;
   }
   if (action.type === 'waitForWindowMethod') {
@@ -418,6 +437,11 @@ function actionProgressLabel(action = {}) {
   return cleanString(action.type, 'action');
 }
 
+function selectorWaitState(value) {
+  let state = cleanString(value, 'visible');
+  return ['attached', 'detached', 'visible', 'hidden'].includes(state) ? state : 'visible';
+}
+
 function emitStage(executionOptions, stage, detail = {}) {
   if (typeof executionOptions.onStage !== 'function') return;
   executionOptions.onStage({
@@ -548,6 +572,10 @@ export function createLocalBrowserScreencastProvider(options = {}) {
         let startedAt = Date.now();
         let stateSamples = [];
         let frameFiles = [];
+        let frameFormat = cleanFrameFormat(job.frameFormat || executionOptions.frameFormat || options.frameFormat, 'png');
+        let frameExtension = frameFormatExtension(frameFormat);
+        let framePattern = `frame-%05d.${frameExtension}`;
+        let frameMimeType = frameFormatMimeType(frameFormat);
 
         emitStage(executionOptions, 'capture:start', {
           frames: video.frameCount,
@@ -591,16 +619,17 @@ export function createLocalBrowserScreencastProvider(options = {}) {
             });
           }
 
-          let framePath = join(framesDir, `frame-${String(frame).padStart(5, '0')}.png`);
+          let framePath = join(framesDir, `frame-${String(frame).padStart(5, '0')}.${frameExtension}`);
           await withAbort(page.screenshot({
             path: framePath,
+            type: frameFormat,
             fullPage: false,
           }), signal);
           frameFiles.push({
             index: frame,
             path: framePath,
             elapsedMs: Math.round(elapsedMs),
-            mimeType: 'image/png',
+            mimeType: frameMimeType,
           });
 
           if (typeof executionOptions.onProgress === 'function') {
@@ -610,6 +639,8 @@ export function createLocalBrowserScreencastProvider(options = {}) {
               progress: (frame + 1) / video.frameCount,
               stage: 'capture',
               framesDir,
+              framePattern,
+              mimeType: frameMimeType,
             });
           }
 
@@ -642,8 +673,8 @@ export function createLocalBrowserScreencastProvider(options = {}) {
             width: video.width,
             height: video.height,
             framesDir,
-            framePattern: 'frame-%05d.png',
-            mimeType: 'image/png',
+            framePattern,
+            mimeType: frameMimeType,
             frameFiles,
             source: { url: job.surface.url },
             ...(output ? { path: output } : {}),
@@ -661,7 +692,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
         await withAbort(execFile(ffmpegPath, [
           '-y',
           '-framerate', String(video.fps),
-          '-i', join(framesDir, 'frame-%05d.png'),
+          '-i', join(framesDir, framePattern),
           '-c:v', 'libx264',
           '-preset', 'fast',
           '-crf', '18',

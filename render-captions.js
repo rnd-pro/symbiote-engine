@@ -49,6 +49,117 @@ function escapeVttText(value) {
     .replace(/>/g, '&gt;');
 }
 
+function finitePositiveNumber(value, fallback = 0) {
+  let number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function assColor(value, fallback) {
+  let text = cleanString(value, '');
+  let hex = text.startsWith('#') ? text.slice(1) : text;
+  if (/^[0-9a-f]{6}$/i.test(hex)) {
+    let rr = hex.slice(0, 2);
+    let gg = hex.slice(2, 4);
+    let bb = hex.slice(4, 6);
+    return `&H00${bb}${gg}${rr}`.toUpperCase();
+  }
+  return fallback;
+}
+
+export function resolveCaptionStyle(input = {}) {
+  let source = input && typeof input === 'object' ? input : {};
+  let preset = cleanString(source.preset, 'tiktok') || 'tiktok';
+  return {
+    preset,
+    fontName: cleanString(source.fontName || source.font, 'Arial'),
+    fontSize: Math.round(finitePositiveNumber(source.fontSize, preset === 'tiktok' ? 28 : 22)),
+    marginV: Math.round(finiteNonNegativeNumber(source.marginV, preset === 'tiktok' ? 80 : 52)),
+    primaryColor: assColor(source.color, '&H00FFFFFF'),
+    highlightColor: assColor(source.highlightColor, '&H0000FFFF'),
+    outlineColor: assColor(source.outlineColor, '&H80000000'),
+    backColor: assColor(source.backgroundColor || source.backColor, '&H7A000000'),
+  };
+}
+
+function escapeAssText(value) {
+  return cleanString(value, '')
+    .replace(/[{}\r\n]/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function formatAssTimestamp(seconds) {
+  let totalCs = Math.max(0, Math.round(Number(seconds || 0) * 100));
+  let cs = totalCs % 100;
+  let totalSeconds = Math.floor(totalCs / 100);
+  let sec = totalSeconds % 60;
+  let totalMinutes = Math.floor(totalSeconds / 60);
+  let min = totalMinutes % 60;
+  let hour = Math.floor(totalMinutes / 60);
+  return `${hour}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}.${String(cs).padStart(2, '0')}`;
+}
+
+function cueText(cue = {}) {
+  return Array.isArray(cue.words) ? cue.words.join(' ') : cleanString(cue.text, '');
+}
+
+export function captionCueHasWordTimings(cue = {}) {
+  return Array.isArray(cue.wordTimings) && cue.wordTimings.length > 0;
+}
+
+function assKaraokeText(cue = {}) {
+  let timings = Array.isArray(cue.wordTimings) ? cue.wordTimings : [];
+  if (!timings.length) return escapeAssText(cueText(cue));
+  let cursorSec = Math.max(0, Number(cue.startSec || 0));
+  let parts = [];
+  for (let word of timings) {
+    let startSec = Math.max(cursorSec, Number(word.startSec || cursorSec));
+    let endSec = Math.max(startSec + 0.01, Number(word.endSec || startSec + 0.35));
+    let durationCs = Math.max(1, Math.round((endSec - cursorSec) * 100));
+    parts.push(`{\\k${durationCs}}${escapeAssText(word.text)}`);
+    cursorSec = endSec;
+  }
+  let tailCs = Math.max(0, Math.round((Number(cue.endSec || cursorSec) - cursorSec) * 100));
+  if (tailCs > 0) parts.push(`{\\k${tailCs}}`);
+  return parts.join(' ');
+}
+
+export function renderAss(cues = [], options = {}) {
+  let style = resolveCaptionStyle(options.captionStyle || options.style || {});
+  let safeCues = (Array.isArray(cues) ? cues : []).filter((cue) => cueText(cue));
+  let hasTimedWords = safeCues.some(captionCueHasWordTimings);
+  if (!safeCues.length || !hasTimedWords) return '';
+  let header = [
+    '[Script Info]',
+    'ScriptType: v4.00+',
+    'WrapStyle: 0',
+    'ScaledBorderAndShadow: yes',
+    'PlayResX: 1080',
+    'PlayResY: 1920',
+    '',
+    '[V4+ Styles]',
+    'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
+    `Style: TikTok,${style.fontName},${style.fontSize},${style.primaryColor},${style.highlightColor},${style.outlineColor},${style.backColor},-1,0,0,0,100,100,0,0,3,1,1,2,40,40,${style.marginV},1`,
+    '',
+    '[Events]',
+    'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+  ];
+  let events = safeCues.map((cue) => [
+    'Dialogue: 0',
+    formatAssTimestamp(cue.startSec),
+    formatAssTimestamp(cue.endSec),
+    'TikTok',
+    escapeAssText(cue.speaker || ''),
+    '0000',
+    '0000',
+    '0000',
+    '',
+    assKaraokeText(cue),
+  ].join(','));
+  return `${header.concat(events).join('\n')}\n`;
+}
+
 export function captionTranscriptDurationSec(transcript = {}) {
   let explicit = Number(transcript.durationSec ?? transcript.duration ?? 0);
   if (Number.isFinite(explicit) && explicit > 0) return explicit;
@@ -77,6 +188,7 @@ export function captionCuesFromTranscript(transcript = {}, cues = []) {
         startSec,
         endSec,
         words: [],
+        wordTimings: [],
         speaker: attribution.speaker,
         attributionSource: attribution.source,
         cueIndex: attribution.cueIndex,
@@ -85,6 +197,7 @@ export function captionCuesFromTranscript(transcript = {}, cues = []) {
       captionCues.push(current);
     }
     current.words.push(text);
+    current.wordTimings.push({ text, startSec, endSec });
     current.endSec = Math.max(current.endSec, endSec);
     if (attribution.source === 'unmapped') current.unmappedWordCount += 1;
   }
@@ -96,6 +209,7 @@ export function captionCuesFromTranscript(transcript = {}, cues = []) {
       startSec: 0,
       endSec: safeDuration,
       words: [cleanString(transcript.text, '')],
+      wordTimings: [],
       speaker: attribution.speaker,
       attributionSource: attribution.source,
       cueIndex: attribution.cueIndex,
@@ -137,6 +251,7 @@ export function captionCuesFromClipTranscripts(clipTranscripts = []) {
         startSec: word.startSec,
         endSec: word.endSec,
         words: [],
+        wordTimings: [],
         speaker: word.speaker,
         attributionSource: 'clip-transcript',
         cueIndex: word.cueIndex,
@@ -145,9 +260,17 @@ export function captionCuesFromClipTranscripts(clipTranscripts = []) {
       captionCues.push(current);
     }
     current.words.push(word.text);
+    current.wordTimings.push({ text: word.text, startSec: word.startSec, endSec: word.endSec });
     current.endSec = Math.max(current.endSec, word.endSec);
   }
   return captionCues.filter((cue) => cue.words.join(' ').trim());
+}
+
+function hasTimedClipTranscriptWords(clipTranscripts = []) {
+  return (Array.isArray(clipTranscripts) ? clipTranscripts : []).some((clip) => (
+    Array.isArray(clip?.words)
+    && clip.words.some((word) => cleanString(word?.word || word?.text, ''))
+  ));
 }
 
 export function renderVtt(cues = []) {
@@ -169,16 +292,16 @@ export function buildCaptionCues({
   cues: sourceCues = [],
   clipTranscripts = [],
   sequenceMode = '',
+  captionStyle = {},
 } = {}) {
-  let useClipTranscripts = sequenceMode === 'overlap'
-    && Array.isArray(clipTranscripts)
-    && clipTranscripts.length > 0;
+  let useClipTranscripts = hasTimedClipTranscriptWords(clipTranscripts);
   let cues = useClipTranscripts
     ? captionCuesFromClipTranscripts(clipTranscripts)
     : captionCuesFromTranscript(transcript, sourceCues);
   return {
     cues,
     vtt: renderVtt(cues),
+    ass: renderAss(cues, { captionStyle }),
     source: useClipTranscripts ? 'whisper+clip-range-map' : 'whisper+range-map',
   };
 }
