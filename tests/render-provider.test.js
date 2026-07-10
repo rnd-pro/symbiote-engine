@@ -741,6 +741,47 @@ test('deterministic worker failure aborts and closes the entire pool', async () 
   assert.deepEqual(closed.sort(), [0, 1]);
 });
 
+test('abort during browser launch closes the late browser process', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-worker-launch-abort-'));
+  let markLaunchStarted;
+  let launchStarted = new Promise((resolve) => { markLaunchStarted = resolve; });
+  let resolveBrowser;
+  let browserPromise = new Promise((resolve) => { resolveBrowser = resolve; });
+  let closed = 0;
+  let controller = new AbortController();
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        markLaunchStarted();
+        return browserPromise;
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+  let execution = provider.execute({
+    id: 'worker-launch-abort',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 34, frameCount: 1 },
+    timeline: [],
+    renderClock: { mode: 'deterministic', path: '__fixture.renderAt', workerCount: 1 },
+  }, {
+    artifactKind: 'frame-sequence',
+    browserProfileRoot: tmp,
+    browserCloseTimeoutMs: 100,
+    signal: controller.signal,
+  });
+
+  await launchStarted;
+  controller.abort(new Error('stop during launch'));
+  resolveBrowser({ async close() { closed += 1; } });
+
+  await assert.rejects(execution, /stop during launch/);
+  assert.equal(closed, 1);
+});
+
 test('deterministic capture fails on stale presented time and render hook timeout', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-render-clock-errors-'));
   let closed = 0;

@@ -567,6 +567,24 @@ async function closeBrowserWorker(browser, executionOptions, detail = {}) {
   return { timedOut, timeoutMs };
 }
 
+async function closeBrowserLaunchAfterAbort(launchPromise, executionOptions, detail = {}) {
+  let timeoutMs = Math.max(100, Math.round(Number(executionOptions.browserCloseTimeoutMs) || 5000));
+  let timer;
+  let launched = await Promise.race([
+    launchPromise.then((browser) => ({ browser }), () => ({ browser: null })),
+    new Promise((resolveTimeout) => {
+      timer = setTimeout(() => resolveTimeout(null), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+  if (launched?.browser) return closeBrowserWorker(launched.browser, executionOptions, detail);
+  if (launched) return { timedOut: false, timeoutMs };
+  emitStage(executionOptions, 'browser:launch.cleanup.timeout', { ...detail, timeoutMs });
+  launchPromise
+    .then((browser) => closeBrowserWorker(browser, executionOptions, detail))
+    .catch(() => {});
+  return { timedOut: true, timeoutMs };
+}
+
 function wantsFrameSequenceArtifact(job, executionOptions = {}) {
   let requestedKind = cleanString(
     executionOptions.artifactKind || job.artifactKind || job.output?.kind,
@@ -604,7 +622,7 @@ async function prepareBrowserWorker({
   let detail = { workerIndex: range.workerIndex, startFrame: range.startFrame, endFrame: range.endFrame };
   emitStage(executionOptions, 'browser:launch', detail);
   assertNotAborted(signal);
-  let browser = await withAbort(puppeteer.launch({
+  let launchPromise = Promise.resolve().then(() => puppeteer.launch({
     headless: true,
     userDataDir: profileDir,
     args: [
@@ -614,7 +632,14 @@ async function prepareBrowserWorker({
       '--force-color-profile=srgb',
       '--hide-scrollbars',
     ],
-  }), signal);
+  }));
+  let browser;
+  try {
+    browser = await withAbort(launchPromise, signal);
+  } catch (error) {
+    if (signal?.aborted) await closeBrowserLaunchAfterAbort(launchPromise, executionOptions, detail);
+    throw error;
+  }
   try {
     emitStage(executionOptions, 'browser:page', detail);
     let page = await withAbort(browser.newPage(), signal);

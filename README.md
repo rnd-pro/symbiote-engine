@@ -185,11 +185,12 @@ contract for seekable offline pages:
 
 Before each screenshot the provider calls the page method with exact timeline
 time and frame/worker metadata. The method must return
-`{ presentedTimeMs, projectionId }`. Stateful provider `timeline` actions are
-rejected in deterministic mode because the page owns arbitrary-time state
-projection. Multiple workers use isolated browser profiles and contiguous frame
-ranges; artifacts include capture duration, throughput, range, and warm-up
-metadata. Realtime capture remains single-worker.
+`{ presentedTimeMs, projectionId }`, where `projectionId` is a non-empty,
+deterministic identity for that frame projection. Stateful provider `timeline`
+actions are rejected in deterministic mode because the page owns arbitrary-time
+state projection. Multiple workers use isolated browser profiles and contiguous
+frame ranges; artifacts include capture duration, throughput, range, and
+warm-up metadata. Realtime capture remains single-worker.
 
 ## License
 
