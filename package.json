@@ -22,6 +22,7 @@
     "./render-lifecycle": "./render-lifecycle.js",
     "./render-proof": "./render-proof.js",
     "./render-progress": "./render-progress.js",
+    "./render-workers": "./render-workers.js",
     "./render-jobs": "./render-jobs.js",
     "./providers/*": "./providers/*",
     "./packs/*": "./packs/*",

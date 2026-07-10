@@ -160,9 +160,36 @@ symbiote-engine inspect workflow.json --json
   render pipelines.
 - `symbiote-engine/render-jobs` — engine-owned render provider job queue
   primitives with progress, timeout, cancel, cache-hit, and cleanup events.
+- `symbiote-engine/render-workers` — contiguous frame-range partitioning and
+  ordered completion tracking for bounded parallel capture.
 - `symbiote-engine/packs/*` — reusable domain packs and node handlers.
 - `symbiote-engine/providers/*` — injectable local provider implementations,
   including browser screencast and local audio HTTP clients.
+
+### Deterministic browser capture
+
+`createLocalBrowserScreencastProvider()` accepts an opt-in `renderClock` job
+contract for seekable offline pages:
+
+```js
+{
+  renderClock: {
+    mode: 'deterministic',
+    path: '__renderSurface.renderAt',
+    workerCount: 4,
+    settleFrames: 2,
+    timeoutMs: 10000,
+  },
+}
+```
+
+Before each screenshot the provider calls the page method with exact timeline
+time and frame/worker metadata. The method must return
+`{ presentedTimeMs, projectionId }`. Stateful provider `timeline` actions are
+rejected in deterministic mode because the page owns arbitrary-time state
+projection. Multiple workers use isolated browser profiles and contiguous frame
+ranges; artifacts include capture duration, throughput, range, and warm-up
+metadata. Realtime capture remains single-worker.
 
 ## License
 

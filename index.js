@@ -74,6 +74,10 @@ export {
 } from './contracts/index.js';
 
 export { createLocalBrowserScreencastProvider } from './providers/local-browser-screencast.js';
+export {
+  createRenderFrameCompletionTracker,
+  partitionRenderFrameRanges,
+} from './render-workers.js';
 export { createFileArtifactStore } from './artifacts.js';
 export { createAudioProviderJobQueue } from './provider-jobs.js';
 export {

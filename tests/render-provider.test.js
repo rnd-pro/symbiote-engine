@@ -182,6 +182,36 @@ test('render artifact contract supports ordered frame-sequence metadata', () => 
     }),
     /renderArtifact\.source\.url: is required/,
   );
+
+  let capture = normalizeRenderArtifact({
+    kind: 'frame-sequence',
+    providerId: 'p',
+    frames: 1,
+    fps: 30,
+    durationSec: 1 / 30,
+    width: 320,
+    height: 180,
+    framesDir: '/tmp/frames',
+    frameFiles: [{ path: '/tmp/frames/frame-00000.webp', mimeType: 'image/webp' }],
+    source: { url: 'http://example.test/render' },
+    capture: {
+      mode: 'deterministic',
+      workerCount: 1,
+      durationMs: 12,
+      throughputFps: 83.333,
+      frameTimeSource: 'page-render-clock',
+      workerRanges: [{
+        workerIndex: 0,
+        startFrame: 0,
+        endFrame: 0,
+        frameCount: 1,
+        warmupDurationMs: 8,
+        captureDurationMs: 4,
+      }],
+    },
+  });
+  assert.equal(capture.capture.mode, 'deterministic');
+  assert.equal(capture.capture.workerRanges[0].warmupDurationMs, 8);
 });
 
 test('render provider contract stays browser-safe while local provider stays Node-only', async () => {
@@ -481,6 +511,224 @@ test('local browser screencast provider supports WebP frame-sequence capture', a
     ['frame-%05d.webp', 'image/webp'],
     ['frame-%05d.webp', 'image/webp'],
   ]);
+});
+
+test('local browser screencast provider renders deterministic ranges in parallel', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-deterministic-workers-'));
+  let launches = [];
+  let events = [];
+  let progress = [];
+  let closed = [];
+  let pages = [];
+  let puppeteer = {
+    async launch(options) {
+      let workerIndex = launches.length;
+      launches.push(options);
+      let pageEvents = [];
+      let page = {
+        mouse: { click: async () => {} },
+        async setViewport() {},
+        async goto() { pageEvents.push('goto'); },
+        async evaluate(_fn, arg) {
+          if (arg?.frameContext) {
+            pageEvents.push(`render:${arg.frameContext.frameIndex}`);
+            return {
+              presentedTimeMs: arg.frameContext.timeMs,
+              projectionId: `fixture:${arg.frameContext.frameIndex}`,
+            };
+          }
+          if (arg?.settleFrames != null) {
+            pageEvents.push(`settle:${arg.frameIndex}`);
+            return { settled: true };
+          }
+          return { supported: false };
+        },
+        async screenshot(options) {
+          let frame = Number(options.path.match(/frame-(\d+)/)?.[1]);
+          pageEvents.push(`screenshot:${frame}`);
+        },
+      };
+      pages.push(pageEvents);
+      return {
+        async newPage() { return page; },
+        async close() { closed.push(workerIndex); },
+      };
+    },
+  };
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer,
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+
+  let result = await provider.execute({
+    id: 'deterministic-workers',
+    frameFormat: 'webp',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 200, frameCount: 6 },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 2,
+      settleFrames: 2,
+      timeoutMs: 1000,
+    },
+  }, {
+    artifactKind: 'frame-sequence',
+    browserProfileRoot: tmp,
+    onStage(event) { events.push(event); },
+    onProgress(event) { progress.push(event); },
+  });
+
+  assert.equal(launches.length, 2);
+  assert.deepEqual(closed.sort(), [0, 1]);
+  assert.deepEqual(result.frameFiles.map((frame) => frame.index), [0, 1, 2, 3, 4, 5]);
+  assert.deepEqual(result.frameFiles.map((frame) => frame.elapsedMs), [0, 33, 67, 100, 133, 167]);
+  assert.equal(result.capture.mode, 'deterministic');
+  assert.equal(result.capture.workerCount, 2);
+  assert.deepEqual(result.capture.workerRanges.map((range) => [range.startFrame, range.endFrame]), [
+    [0, 2],
+    [3, 5],
+  ]);
+  assert.equal(progress.at(-1).completedFrames, 6);
+  assert.equal(progress.at(-1).contiguousFrames, 6);
+  assert.equal(progress.at(-1).frame, 6);
+  assert.ok(events.some((event) => event.stage === 'capture-worker:start' && event.workerIndex === 1));
+  for (let pageEvents of pages) {
+    for (let event of pageEvents.filter((item) => item.startsWith('screenshot:'))) {
+      let frame = event.split(':')[1];
+      assert.ok(pageEvents.indexOf(`render:${frame}`) < pageEvents.indexOf(event));
+      assert.ok(pageEvents.indexOf(`settle:${frame}`) < pageEvents.indexOf(event));
+    }
+  }
+});
+
+test('deterministic capture rejects stateful engine timeline actions', async () => {
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: { async launch() { throw new Error('must not launch'); } },
+    execFile: async () => {},
+  });
+  await assert.rejects(provider.execute({
+    id: 'stateful-timeline',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 100, frameCount: 3 },
+    timeline: [{ type: 'clickText', text: 'Next', atMs: 0 }],
+    renderClock: { mode: 'deterministic', path: '__fixture.renderAt', workerCount: 2 },
+  }, { artifactKind: 'frame-sequence' }), /does not support stateful renderJob\.timeline/);
+});
+
+test('parallel capture requires a deterministic render clock', async () => {
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: { async launch() { throw new Error('must not launch'); } },
+    execFile: async () => {},
+  });
+  await assert.rejects(provider.execute({
+    id: 'missing-clock',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 100, frameCount: 3 },
+    timeline: [],
+    execution: { workerCount: 2 },
+  }, { artifactKind: 'frame-sequence' }), /parallel capture requires renderJob\.renderClock/);
+});
+
+test('deterministic worker failure aborts and closes the entire pool', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-worker-failure-'));
+  let launchIndex = 0;
+  let closed = [];
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        let workerIndex = launchIndex;
+        launchIndex += 1;
+        let page = {
+          mouse: { click: async () => {} },
+          async setViewport() {},
+          async goto() {},
+          async evaluate(_fn, arg) {
+            if (arg?.frameContext && workerIndex === 0) throw new Error('render hook failed');
+            if (arg?.frameContext) {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+              return { presentedTimeMs: arg.frameContext.timeMs, projectionId: 'slow' };
+            }
+            return { settled: true };
+          },
+          async screenshot() {},
+        };
+        return {
+          async newPage() { return page; },
+          async close() { closed.push(workerIndex); },
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+
+  await assert.rejects(provider.execute({
+    id: 'worker-failure',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 200, frameCount: 6 },
+    timeline: [],
+    renderClock: { mode: 'deterministic', path: '__fixture.renderAt', workerCount: 2 },
+  }, { artifactKind: 'frame-sequence', browserProfileRoot: tmp }), /render hook failed/);
+  assert.deepEqual(closed.sort(), [0, 1]);
+});
+
+test('deterministic capture fails on stale presented time and render hook timeout', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-render-clock-errors-'));
+  let closed = 0;
+  let makeProvider = (evaluate) => createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        let page = {
+          mouse: { click: async () => {} },
+          async setViewport() {},
+          async goto() {},
+          evaluate,
+          async screenshot() {},
+        };
+        return {
+          async newPage() { return page; },
+          async close() { closed += 1; },
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+  let job = {
+    id: 'render-clock-error',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 34, frameCount: 1 },
+    timeline: [],
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 1,
+      timeoutMs: 15,
+    },
+  };
+
+  await assert.rejects(makeProvider(async (_fn, arg) => {
+    if (arg?.frameContext) return { presentedTimeMs: 40, projectionId: 'stale' };
+    return { supported: false };
+  }).execute(job, { artifactKind: 'frame-sequence', browserProfileRoot: tmp }), /presented invalid time/);
+  await assert.rejects(makeProvider(async (_fn, arg) => {
+    if (arg?.frameContext) return new Promise(() => {});
+    return { supported: false };
+  }).execute(job, { artifactKind: 'frame-sequence', browserProfileRoot: tmp }), /timed out at frame 0/);
+  assert.equal(closed, 2);
 });
 
 test('local browser screencast provider waits for document fonts before capture', async () => {

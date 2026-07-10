@@ -48,6 +48,34 @@ function normalizeKind(value, supported, fallback, path) {
   return kind;
 }
 
+function normalizeRenderCapture(value) {
+  if (value === undefined || value === null) return undefined;
+  let capture = requireObject(value, 'renderArtifact.capture');
+  let mode = cleanString(capture.mode, 'realtime');
+  if (!['realtime', 'deterministic'].includes(mode)) {
+    fail('renderArtifact.capture.mode', 'must be "realtime" or "deterministic"');
+  }
+  let workerRanges = (Array.isArray(capture.workerRanges) ? capture.workerRanges : []).map((range, index) => {
+    requireObject(range, `renderArtifact.capture.workerRanges[${index}]`);
+    return {
+      workerIndex: optionalNonNegativeInteger(range.workerIndex, `renderArtifact.capture.workerRanges[${index}].workerIndex`) ?? index,
+      startFrame: optionalNonNegativeInteger(range.startFrame, `renderArtifact.capture.workerRanges[${index}].startFrame`) ?? 0,
+      endFrame: optionalNonNegativeInteger(range.endFrame, `renderArtifact.capture.workerRanges[${index}].endFrame`) ?? 0,
+      frameCount: positiveInteger(range.frameCount, undefined, `renderArtifact.capture.workerRanges[${index}].frameCount`),
+      warmupDurationMs: optionalNonNegativeNumber(range.warmupDurationMs, `renderArtifact.capture.workerRanges[${index}].warmupDurationMs`) ?? 0,
+      captureDurationMs: optionalNonNegativeNumber(range.captureDurationMs, `renderArtifact.capture.workerRanges[${index}].captureDurationMs`) ?? 0,
+    };
+  });
+  return {
+    mode,
+    workerCount: positiveInteger(capture.workerCount, 1, 'renderArtifact.capture.workerCount'),
+    durationMs: optionalNonNegativeNumber(capture.durationMs, 'renderArtifact.capture.durationMs') ?? 0,
+    throughputFps: optionalNonNegativeNumber(capture.throughputFps, 'renderArtifact.capture.throughputFps') ?? 0,
+    frameTimeSource: cleanString(capture.frameTimeSource, mode === 'deterministic' ? 'page-render-clock' : 'wall-clock'),
+    workerRanges,
+  };
+}
+
 export function normalizeRenderProvider(provider = {}) {
   requireObject(provider, 'renderProvider');
   let id = cleanString(provider.id, '');
@@ -100,6 +128,8 @@ export function normalizeRenderArtifact(result = {}, context = {}) {
     width: positiveInteger(result.width, undefined, 'renderArtifact.width'),
     height: positiveInteger(result.height, undefined, 'renderArtifact.height'),
   };
+  let capture = normalizeRenderCapture(result.capture);
+  if (capture) common.capture = capture;
 
   if (kind === 'screencast') {
     let path = cleanString(result.path, '');

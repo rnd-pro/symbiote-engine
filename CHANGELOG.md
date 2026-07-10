@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added deterministic browser render-clock capture, bounded parallel worker
+  coordination, ordered frame progress, and capture performance metadata.
 - Added audio provider contract helpers, an engine-owned provider job queue,
   a content-addressed artifact store, and an injectable local TTS HTTP provider
   for local audio generation pipelines.

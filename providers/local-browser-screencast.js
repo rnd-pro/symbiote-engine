@@ -5,6 +5,10 @@ import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 import { normalizeRenderArtifact } from '../contracts/render-provider.js';
+import {
+  createRenderFrameCompletionTracker,
+  partitionRenderFrameRanges,
+} from '../render-workers.js';
 
 const defaultExecFile = promisify(nodeExecFile);
 
@@ -88,6 +92,14 @@ function positiveNumber(value, fallback, path) {
     throw new Error(`${path}: must be a positive number`);
   }
   return number;
+}
+
+function nonNegativeInteger(value, fallback, path, max = Number.MAX_SAFE_INTEGER) {
+  let number = Number(value ?? fallback);
+  if (!Number.isFinite(number) || number < 0) {
+    throw new Error(`${path}: must be a non-negative integer`);
+  }
+  return Math.min(max, Math.floor(number));
 }
 
 function resolvePath(cwd, filePath, pathName) {
@@ -407,6 +419,93 @@ function normalizeVideo(video = {}) {
   };
 }
 
+function normalizeRenderClock(job, executionOptions, providerOptions, video) {
+  let source = job.renderClock && typeof job.renderClock === 'object' ? job.renderClock : null;
+  let requestedWorkers = Math.max(1, Math.floor(Number(
+    executionOptions.workerCount
+      ?? job.execution?.workerCount
+      ?? source?.workerCount
+      ?? providerOptions.workerCount
+      ?? 1,
+  ) || 1));
+  if (!source) {
+    if (requestedWorkers > 1) {
+      throw new Error('parallel capture requires renderJob.renderClock');
+    }
+    return { mode: 'realtime', workerCount: 1 };
+  }
+  let mode = cleanString(source.mode, 'deterministic');
+  if (mode !== 'deterministic') {
+    throw new Error('renderJob.renderClock.mode: supported value is "deterministic"');
+  }
+  let path = cleanPathParts(source.path, 'renderJob.renderClock.path').join('.');
+  let timeline = Array.isArray(job.timeline) ? job.timeline : [];
+  if (timeline.length) {
+    throw new Error('deterministic capture does not support stateful renderJob.timeline actions');
+  }
+  return {
+    mode,
+    path,
+    workerCount: Math.min(video.frameCount, requestedWorkers),
+    settleFrames: nonNegativeInteger(source.settleFrames, 2, 'renderJob.renderClock.settleFrames', 10),
+    timeoutMs: Math.round(positiveNumber(source.timeoutMs, 10000, 'renderJob.renderClock.timeoutMs')),
+  };
+}
+
+function createPoolAbortController(signal) {
+  let controller = new AbortController();
+  let onAbort = () => controller.abort(signal.reason);
+  if (signal?.aborted) onAbort();
+  else signal?.addEventListener?.('abort', onAbort, { once: true });
+  return {
+    controller,
+    dispose() {
+      signal?.removeEventListener?.('abort', onAbort);
+    },
+  };
+}
+
+function withTimeout(promise, timeoutMs, message) {
+  let timer;
+  let timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
+async function callRenderAt(page, renderClock, frameContext, signal) {
+  let methodParts = cleanPathParts(renderClock.path, 'renderJob.renderClock.path');
+  let result = await withTimeout(withAbort(page.evaluate(async ({ methodParts: parts, frameContext: context }) => {
+    let owner = window;
+    for (let index = 0; index < parts.length - 1; index += 1) owner = owner?.[parts[index]];
+    let method = owner?.[parts[parts.length - 1]];
+    if (typeof method !== 'function') throw new Error(`render clock method not found: ${parts.join('.')}`);
+    return method.call(owner, context);
+  }, { methodParts, frameContext }), signal), renderClock.timeoutMs,
+  `render clock ${renderClock.path} timed out at frame ${frameContext.frameIndex}`);
+  let presentedTimeMs = Number(result?.presentedTimeMs);
+  if (!Number.isFinite(presentedTimeMs) || Math.abs(presentedTimeMs - frameContext.timeMs) > 0.01) {
+    throw new Error(`render clock ${renderClock.path} presented invalid time at frame ${frameContext.frameIndex}`);
+  }
+  let projectionId = cleanString(result?.projectionId, '');
+  if (!projectionId) {
+    throw new Error(`render clock ${renderClock.path} returned no projectionId at frame ${frameContext.frameIndex}`);
+  }
+  if (renderClock.settleFrames > 0) {
+    await withTimeout(withAbort(page.evaluate(async ({ settleFrames, frameIndex }) => {
+      for (let index = 0; index < settleFrames; index += 1) {
+        await new Promise((resolveFrame) => requestAnimationFrame(resolveFrame));
+      }
+      return { settled: true, frameIndex };
+    }, {
+      settleFrames: renderClock.settleFrames,
+      frameIndex: frameContext.frameIndex,
+    }), signal), renderClock.timeoutMs,
+    `render presentation barrier timed out at frame ${frameContext.frameIndex}`);
+  }
+  return { presentedTimeMs, projectionId };
+}
+
 function createFramesDir(root, id) {
   return join(root || join(os.tmpdir(), 'symbiote-engine-render'), `${safeId(id)}-${Date.now()}`);
 }
@@ -458,6 +557,385 @@ function wantsFrameSequenceArtifact(job, executionOptions = {}) {
   return executionOptions.skipEncode === true || requestedKind === 'frame-sequence';
 }
 
+async function settleWorkerPool(tasks, controller) {
+  let firstFailure = null;
+  let promises = tasks.map((task) => Promise.resolve().then(task).catch((error) => {
+    if (!firstFailure) {
+      firstFailure = error;
+      controller.abort(error);
+    }
+    throw error;
+  }));
+  let settled = await Promise.allSettled(promises);
+  if (firstFailure) throw firstFailure;
+  return settled.map((result) => result.value);
+}
+
+async function prepareBrowserWorker({
+  puppeteer,
+  job,
+  video,
+  range,
+  profileDir,
+  renderClock,
+  signal,
+  log,
+  executionOptions,
+}) {
+  let workerStartedAt = Date.now();
+  let detail = { workerIndex: range.workerIndex, startFrame: range.startFrame, endFrame: range.endFrame };
+  emitStage(executionOptions, 'browser:launch', detail);
+  assertNotAborted(signal);
+  let browser = await withAbort(puppeteer.launch({
+    headless: true,
+    userDataDir: profileDir,
+    args: [
+      `--window-size=${video.width},${video.height}`,
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--force-color-profile=srgb',
+      '--hide-scrollbars',
+    ],
+  }), signal);
+  try {
+    emitStage(executionOptions, 'browser:page', detail);
+    let page = await withAbort(browser.newPage(), signal);
+    await withAbort(page.setViewport({
+      width: video.width,
+      height: video.height,
+      deviceScaleFactor: 1,
+    }), signal);
+    emitStage(executionOptions, 'browser:navigate', { ...detail, url: job.surface.url });
+    await withAbort(page.goto(job.surface.url, { waitUntil: 'domcontentloaded', timeout: 30000 }), signal);
+    emitStage(executionOptions, 'browser:navigated', { ...detail, url: job.surface.url });
+
+    let setupActions = job.setup || [];
+    emitStage(executionOptions, 'setup:start', { ...detail, actions: setupActions.length });
+    for (let index = 0; index < setupActions.length; index += 1) {
+      let action = setupActions[index];
+      emitStage(executionOptions, 'setup-action:start', {
+        ...detail,
+        index,
+        type: action.type,
+        label: actionProgressLabel(action),
+      });
+      try {
+        await withAbort(executeAction(page, action, log), signal);
+      } catch (error) {
+        let wrapped = new Error(`setup action ${index} (${actionProgressLabel(action)}) failed: ${error?.message || error}`);
+        wrapped.cause = error;
+        throw wrapped;
+      }
+      emitStage(executionOptions, 'setup-action:done', {
+        ...detail,
+        index,
+        type: action.type,
+        label: actionProgressLabel(action),
+      });
+    }
+    emitStage(executionOptions, 'setup:done', { ...detail, actions: setupActions.length });
+
+    emitStage(executionOptions, 'fonts:wait', detail);
+    await withAbort(waitForFontsReady(page, job.readiness?.fontsTimeoutMs || 10000), signal);
+    emitStage(executionOptions, 'fonts:ready', detail);
+
+    if (job.captions?.enabled) {
+      emitStage(executionOptions, 'captions-overlay:install', detail);
+      await withAbort(installCaptionOverlay(page), signal);
+      emitStage(executionOptions, 'captions-overlay:ready', detail);
+    }
+    return {
+      browser,
+      page,
+      range,
+      profileDir,
+      warmupDurationMs: Date.now() - workerStartedAt,
+    };
+  } catch (error) {
+    await browser.close().catch(() => {});
+    throw error;
+  }
+}
+
+async function captureBrowserWorker({
+  prepared,
+  job,
+  video,
+  renderClock,
+  framesDir,
+  frameFormat,
+  frameExtension,
+  frameMimeType,
+  captureState,
+  signal,
+  executionOptions,
+  onFrame,
+}) {
+  let { page, range } = prepared;
+  let detail = { workerIndex: range.workerIndex, startFrame: range.startFrame, endFrame: range.endFrame };
+  let lastCaptionKey = '';
+  let frameIntervalMs = 1000 / video.fps;
+  let startedAt = Date.now();
+  let stateSamples = [];
+  let frameFiles = [];
+  emitStage(executionOptions, 'capture-worker:start', detail);
+  for (let frame = range.startFrame; frame <= range.endFrame; frame += 1) {
+    assertNotAborted(signal);
+    let elapsedMs = frame * frameIntervalMs;
+    let clockState = await callRenderAt(page, renderClock, {
+      timeMs: elapsedMs,
+      frameIndex: frame,
+      fps: video.fps,
+      durationMs: video.durationMs,
+      workerIndex: range.workerIndex,
+      range: { startFrame: range.startFrame, endFrame: range.endFrame },
+    }, signal);
+
+    let caption = captionAt(job.captions, elapsedMs);
+    let captionKey = caption ? `${caption.speaker}:${caption.text}` : '';
+    if (captionKey !== lastCaptionKey) {
+      await withAbort(setCaption(page, caption), signal);
+      lastCaptionKey = captionKey;
+    }
+
+    if (captureState && frame % captureState.sampleEveryFrames === 0) {
+      stateSamples.push({
+        frame,
+        elapsedMs: Math.round(elapsedMs),
+        state: await withAbort(captureWindowState(page, captureState), signal),
+        ...(clockState ? { renderClock: clockState } : {}),
+      });
+    }
+
+    let framePath = join(framesDir, `frame-${String(frame).padStart(5, '0')}.${frameExtension}`);
+    await withAbort(page.screenshot({
+      path: framePath,
+      type: frameFormat,
+      fullPage: false,
+    }), signal);
+    let frameFile = {
+      index: frame,
+      path: framePath,
+      elapsedMs: Math.round(elapsedMs),
+      mimeType: frameMimeType,
+    };
+    frameFiles.push(frameFile);
+    onFrame(frameFile, detail);
+
+  }
+  let captureDurationMs = Date.now() - startedAt;
+  emitStage(executionOptions, 'capture-worker:done', { ...detail, captureDurationMs });
+  return {
+    frameFiles,
+    stateSamples,
+    metric: {
+      ...detail,
+      frameCount: range.frameCount,
+      warmupDurationMs: prepared.warmupDurationMs,
+      captureDurationMs,
+    },
+  };
+}
+
+async function executeDeterministicCapture({
+  puppeteer,
+  execFile,
+  ffmpegPath,
+  cwd,
+  providerId,
+  job,
+  executionOptions,
+  video,
+  renderClock,
+  ranges,
+  browserProfileDirs,
+  framesDir,
+  frameFormat,
+  frameExtension,
+  framePattern,
+  frameMimeType,
+  frameSequenceArtifact,
+  captureState,
+  captureStatePath,
+  output,
+  log,
+  signal,
+}) {
+  let pool = createPoolAbortController(signal);
+  let activeWorkers = [];
+  let poolStartedAt = Date.now();
+  try {
+    let prepared = await settleWorkerPool(ranges.map((range, index) => async () => {
+      let worker = await prepareBrowserWorker({
+        puppeteer,
+        job,
+        video,
+        range,
+        profileDir: browserProfileDirs[index],
+        renderClock,
+        signal: pool.controller.signal,
+        log,
+        executionOptions,
+      });
+      activeWorkers.push(worker);
+      return worker;
+    }), pool.controller);
+    let completion = createRenderFrameCompletionTracker(video.frameCount);
+    emitStage(executionOptions, 'capture:start', {
+      frames: video.frameCount,
+      fps: video.fps,
+      durationMs: video.durationMs,
+      timelineActions: 0,
+      workerCount: ranges.length,
+      mode: renderClock.mode,
+    });
+    let workerResults = await settleWorkerPool(prepared.map((worker) => async () => (
+      captureBrowserWorker({
+        prepared: worker,
+        job,
+        video,
+        renderClock,
+        framesDir,
+        frameFormat,
+        frameExtension,
+        frameMimeType,
+        captureState,
+        signal: pool.controller.signal,
+        executionOptions,
+        onFrame(frameFile) {
+          let snapshot = completion.mark(frameFile.index);
+          if (typeof executionOptions.onProgress !== 'function') return;
+          executionOptions.onProgress({
+            frame: snapshot.contiguousFrames,
+            frames: video.frameCount,
+            completedFrames: snapshot.completedFrames,
+            contiguousFrames: snapshot.contiguousFrames,
+            progress: snapshot.progress,
+            contiguousProgress: snapshot.contiguousProgress,
+            stage: 'capture',
+            framesDir,
+            framePattern,
+            mimeType: frameMimeType,
+          });
+        },
+      })
+    )), pool.controller);
+    let frameFiles = workerResults
+      .flatMap((result) => result.frameFiles)
+      .sort((a, b) => a.index - b.index);
+    let stateSamples = workerResults
+      .flatMap((result) => result.stateSamples)
+      .sort((a, b) => a.frame - b.frame);
+    let durationMs = Date.now() - poolStartedAt;
+    let capture = {
+      mode: renderClock.mode,
+      workerCount: ranges.length,
+      durationMs,
+      throughputFps: durationMs > 0
+        ? Math.round((video.frameCount / (durationMs / 1000)) * 1000) / 1000
+        : 0,
+      frameTimeSource: 'page-render-clock',
+      workerRanges: workerResults
+        .map((result) => result.metric)
+        .sort((a, b) => a.workerIndex - b.workerIndex),
+    };
+    for (let worker of activeWorkers.splice(0)) {
+      emitStage(executionOptions, 'browser:close', { workerIndex: worker.range.workerIndex });
+      await worker.browser.close().catch(() => {});
+      emitStage(executionOptions, 'browser:closed', { workerIndex: worker.range.workerIndex });
+    }
+    emitStage(executionOptions, 'capture:done', {
+      frames: video.frameCount,
+      workerCount: ranges.length,
+      durationMs,
+      throughputFps: capture.throughputFps,
+    });
+
+    if (captureStatePath) {
+      assertNotAborted(pool.controller.signal);
+      emitStage(executionOptions, 'state:write', { samples: stateSamples.length });
+      await withAbort(writeFile(captureStatePath, `${JSON.stringify({
+        sourceUrl: job.surface.url,
+        providerId,
+        frames: video.frameCount,
+        fps: video.fps,
+        durationMs: video.durationMs,
+        capture,
+        samples: stateSamples,
+      }, null, 2)}\n`), pool.controller.signal);
+      emitStage(executionOptions, 'state:written', { samples: stateSamples.length });
+    }
+
+    if (frameSequenceArtifact) {
+      let artifact = normalizeRenderArtifact({
+        kind: 'frame-sequence',
+        providerId,
+        frames: video.frameCount,
+        fps: video.fps,
+        durationSec: video.durationMs / 1000,
+        width: video.width,
+        height: video.height,
+        framesDir,
+        framePattern,
+        mimeType: frameMimeType,
+        frameFiles,
+        source: { url: job.surface.url },
+        capture,
+        ...(output ? { path: output } : {}),
+      });
+      emitStage(executionOptions, 'frame-sequence:done', artifact);
+      return artifact;
+    }
+
+    emitStage(executionOptions, 'encode:start', {
+      frames: video.frameCount,
+      fps: video.fps,
+      output,
+    });
+    await withAbort(execFile(ffmpegPath, [
+      '-y',
+      '-framerate', String(video.fps),
+      '-i', join(framesDir, framePattern),
+      '-c:v', 'libx264',
+      '-preset', 'fast',
+      '-crf', '18',
+      '-pix_fmt', 'yuv420p',
+      '-vf', `scale=${video.width}:${video.height}`,
+      output,
+    ], { cwd }), pool.controller.signal);
+    emitStage(executionOptions, 'encode:done', { output });
+
+    if (!executionOptions.keepFrames) {
+      emitStage(executionOptions, 'frames:cleanup', { framesDir });
+      await rm(framesDir, { recursive: true, force: true });
+    } else {
+      log(`Frames kept in: ${framesDir}`);
+      emitStage(executionOptions, 'frames:kept', { framesDir });
+    }
+
+    let artifact = normalizeRenderArtifact({
+      path: output,
+      kind: 'screencast',
+      providerId,
+      frames: video.frameCount,
+      fps: video.fps,
+      durationSec: video.durationMs / 1000,
+      width: video.width,
+      height: video.height,
+      capture,
+    });
+    emitStage(executionOptions, 'screencast:done', artifact);
+    return artifact;
+  } finally {
+    for (let worker of activeWorkers.splice(0)) {
+      emitStage(executionOptions, 'browser:close', { workerIndex: worker.range.workerIndex });
+      await worker.browser.close().catch(() => {});
+      emitStage(executionOptions, 'browser:closed', { workerIndex: worker.range.workerIndex });
+    }
+    pool.dispose();
+  }
+}
+
 export function createLocalBrowserScreencastProvider(options = {}) {
   let { puppeteer, ffmpegPath = 'ffmpeg', execFile = defaultExecFile, cwd = process.cwd(), framesRoot } = options;
   if (!puppeteer || typeof puppeteer.launch !== 'function') {
@@ -490,22 +968,62 @@ export function createLocalBrowserScreencastProvider(options = {}) {
       if (captureStatePath) await mkdir(dirname(captureStatePath), { recursive: true });
 
       let video = normalizeVideo(job.video);
+      let renderClock = normalizeRenderClock(job, executionOptions, options, video);
+      let ranges = partitionRenderFrameRanges(video.frameCount, renderClock.workerCount);
       let framesDir = executionOptions.framesDir || createFramesDir(framesRoot, job.id);
-      let browserProfileDir = executionOptions.browserProfileDir
+      let browserProfileBaseDir = executionOptions.browserProfileDir
         || job.execution?.browserProfileDir
         || createBrowserProfileDir(executionOptions.browserProfileRoot || job.execution?.browserProfileRoot, job.id);
-      appendCleanupPath(job, 'browserProfilePaths', browserProfileDir);
+      let browserProfileDirs = ranges.map((range) => (
+        ranges.length === 1 ? browserProfileBaseDir : join(browserProfileBaseDir, `worker-${range.workerIndex}`)
+      ));
+      for (let profileDir of browserProfileDirs) appendCleanupPath(job, 'browserProfilePaths', profileDir);
+      let frameFormat = cleanFrameFormat(job.frameFormat || executionOptions.frameFormat || options.frameFormat, 'png');
+      let frameExtension = frameFormatExtension(frameFormat);
+      let framePattern = `frame-%05d.${frameExtension}`;
+      let frameMimeType = frameFormatMimeType(frameFormat);
       emitStage(executionOptions, 'frames:prepare', {
         framesDir,
         frames: video.frameCount,
         fps: video.fps,
         width: video.width,
         height: video.height,
+        workerCount: ranges.length,
+        mode: renderClock.mode,
       });
       await rm(framesDir, { recursive: true, force: true });
       await mkdir(framesDir, { recursive: true });
-      await rm(browserProfileDir, { recursive: true, force: true });
-      await mkdir(browserProfileDir, { recursive: true });
+      await rm(browserProfileBaseDir, { recursive: true, force: true });
+      for (let profileDir of browserProfileDirs) await mkdir(profileDir, { recursive: true });
+
+      if (renderClock.mode === 'deterministic') {
+        return executeDeterministicCapture({
+          puppeteer,
+          execFile,
+          ffmpegPath,
+          cwd,
+          providerId,
+          job,
+          executionOptions,
+          video,
+          renderClock,
+          ranges,
+          browserProfileDirs,
+          framesDir,
+          frameFormat,
+          frameExtension,
+          framePattern,
+          frameMimeType,
+          frameSequenceArtifact,
+          captureState,
+          captureStatePath,
+          output,
+          log,
+          signal,
+        });
+      }
+
+      let browserProfileDir = browserProfileDirs[0];
 
       emitStage(executionOptions, 'browser:launch', { providerId });
       assertNotAborted(signal);
