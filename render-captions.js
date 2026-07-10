@@ -1,5 +1,8 @@
 import { cleanString, finiteNonNegativeNumber } from './render-utils.js';
 
+const CAPTION_LONG_PAUSE_SEC = 0.75;
+const CAPTION_ALIGNMENT_WARNING_RATIO = 0.35;
+
 export function captionWordTimeSeconds(word = {}, key, fallback = 0) {
   let value = word[`${key}Sec`] ?? word[key] ?? fallback;
   let number = Number(value);
@@ -219,20 +222,174 @@ export function captionCuesFromTranscript(transcript = {}, cues = []) {
   return captionCues.filter((cue) => cue.words.join(' ').trim());
 }
 
+function authoredCaptionTokens(value) {
+  return cleanString(value, '').split(/\s+/).filter(Boolean);
+}
+
+function timedCaptionWords(words = []) {
+  return (Array.isArray(words) ? words : [])
+    .map((word, inputIndex) => {
+      let text = cleanString(word?.word || word?.text, '');
+      let startSec = captionWordTimeSeconds(word, 'start', 0);
+      let endSec = Math.max(startSec + 0.05, captionWordTimeSeconds(word, 'end', startSec + 0.35));
+      return { text, startSec, endSec, inputIndex };
+    })
+    .filter((word) => word.text)
+    .sort((a, b) => a.startSec - b.startSec || a.endSec - b.endSec || a.inputIndex - b.inputIndex)
+    .map(({ inputIndex, ...word }) => word);
+}
+
+function distributeCount(total, weights = []) {
+  if (!weights.length || total < weights.length) return null;
+  let counts = weights.map(() => 1);
+  let remaining = total - weights.length;
+  if (!remaining) return counts;
+  let safeWeights = weights.map((weight) => {
+    let number = Number(weight);
+    return Number.isFinite(number) && number > 0 ? number : 1;
+  });
+  let weightTotal = safeWeights.reduce((sum, weight) => sum + weight, 0);
+  let shares = safeWeights.map((weight, index) => ({
+    index,
+    exact: (remaining * weight) / weightTotal,
+  }));
+  let assigned = 0;
+  for (let share of shares) {
+    let whole = Math.floor(share.exact);
+    counts[share.index] += whole;
+    assigned += whole;
+  }
+  shares
+    .sort((a, b) => (b.exact - Math.floor(b.exact)) - (a.exact - Math.floor(a.exact)) || a.index - b.index)
+    .slice(0, remaining - assigned)
+    .forEach((share) => {
+      counts[share.index] += 1;
+    });
+  return counts;
+}
+
+function captionSpeechSegments(words = []) {
+  let segments = [];
+  for (let word of words) {
+    let current = segments[segments.length - 1];
+    if (!current || word.startSec - current[current.length - 1].endSec > CAPTION_LONG_PAUSE_SEC) {
+      current = [];
+      segments.push(current);
+    }
+    current.push(word);
+  }
+  return segments;
+}
+
+function alignTokensWithinSpeech(tokens = [], words = []) {
+  if (tokens.length === words.length) {
+    return tokens.map((text, index) => ({
+      text,
+      startSec: words[index].startSec,
+      endSec: words[index].endSec,
+    }));
+  }
+  if (tokens.length > words.length) {
+    let tokenCounts = distributeCount(tokens.length, words.map((word) => word.endSec - word.startSec));
+    let cursor = 0;
+    let aligned = [];
+    words.forEach((word, wordIndex) => {
+      let count = tokenCounts[wordIndex];
+      let durationSec = Math.max(0.05, word.endSec - word.startSec);
+      for (let offset = 0; offset < count; offset += 1) {
+        let startSec = word.startSec + (durationSec * offset) / count;
+        let endSec = word.startSec + (durationSec * (offset + 1)) / count;
+        aligned.push({ text: tokens[cursor], startSec, endSec });
+        cursor += 1;
+      }
+    });
+    return aligned;
+  }
+  let wordCounts = distributeCount(words.length, tokens.map((token) => token.replace(/[^\p{L}\p{N}]/gu, '').length || 1));
+  let cursor = 0;
+  return tokens.map((text, tokenIndex) => {
+    let assigned = words.slice(cursor, cursor + wordCounts[tokenIndex]);
+    cursor += wordCounts[tokenIndex];
+    return {
+      text,
+      startSec: assigned[0].startSec,
+      endSec: assigned[assigned.length - 1].endSec,
+    };
+  });
+}
+
+export function alignAuthoredCaptionWords(authoredText = '', timedWords = []) {
+  let tokens = authoredCaptionTokens(authoredText);
+  let sourceWords = timedCaptionWords(timedWords);
+  let authoredTokenCount = tokens.length;
+  let whisperWordCount = sourceWords.length;
+  let mismatchRatio = Math.abs(authoredTokenCount - whisperWordCount) / Math.max(1, authoredTokenCount, whisperWordCount);
+  if (!tokens.length || !sourceWords.length) {
+    return {
+      words: sourceWords,
+      authoredTokenCount,
+      whisperWordCount,
+      mismatchRatio,
+      mode: tokens.length ? 'authored-without-timing' : 'whisper-fallback',
+      warning: tokens.length > 0 && !sourceWords.length,
+      warningReason: tokens.length > 0 && !sourceWords.length ? 'missing-whisper-word-timings' : '',
+    };
+  }
+  if (tokens.length === sourceWords.length) {
+    return {
+      words: alignTokensWithinSpeech(tokens, sourceWords),
+      authoredTokenCount,
+      whisperWordCount,
+      mismatchRatio,
+      mode: 'authored-identity',
+      warning: false,
+      warningReason: '',
+    };
+  }
+
+  let segments = captionSpeechSegments(sourceWords);
+  let segmentTokenCounts = distributeCount(tokens.length, segments.map((segment) => segment.length));
+  let warningReason = mismatchRatio > CAPTION_ALIGNMENT_WARNING_RATIO ? 'large-token-count-mismatch' : '';
+  let aligned = [];
+  if (segmentTokenCounts) {
+    let cursor = 0;
+    segments.forEach((segment, index) => {
+      let segmentTokens = tokens.slice(cursor, cursor + segmentTokenCounts[index]);
+      aligned.push(...alignTokensWithinSpeech(segmentTokens, segment));
+      cursor += segmentTokenCounts[index];
+    });
+  } else {
+    aligned = alignTokensWithinSpeech(tokens, sourceWords);
+    warningReason = 'authored-token-count-below-speech-segment-count';
+  }
+  return {
+    words: aligned,
+    authoredTokenCount,
+    whisperWordCount,
+    mismatchRatio,
+    mode: segmentTokenCounts ? 'authored-resampled' : 'authored-resampled-degraded',
+    warning: Boolean(warningReason),
+    warningReason,
+  };
+}
+
+function clipCaptionAlignment(clip = {}) {
+  return alignAuthoredCaptionWords(clip.authoredText, clip.words);
+}
+
 export function captionCuesFromClipTranscripts(clipTranscripts = []) {
   let words = [];
   for (let clip of Array.isArray(clipTranscripts) ? clipTranscripts : []) {
-    for (let word of Array.isArray(clip.words) ? clip.words : []) {
-      let text = cleanString(word?.word || word?.text, '');
-      if (!text) continue;
-      let startSec = captionWordTimeSeconds(word, 'start', 0);
-      let endSec = Math.max(startSec + 0.05, captionWordTimeSeconds(word, 'end', startSec + 0.35));
+    let alignment = clipCaptionAlignment(clip);
+    let timingSource = alignment.mode.startsWith('authored-') ? 'authored-clip-timing' : 'clip-transcript';
+    for (let word of alignment.words) {
       words.push({
-        text,
-        startSec,
-        endSec,
+        text: word.text,
+        startSec: word.startSec,
+        endSec: word.endSec,
         speaker: cleanString(clip.speaker, ''),
         cueIndex: Number.isFinite(Number(clip.cueIndex)) ? Number(clip.cueIndex) : null,
+        timingSource,
       });
     }
   }
@@ -243,8 +400,10 @@ export function captionCuesFromClipTranscripts(clipTranscripts = []) {
     let gapSec = current ? word.startSec - current.endSec : 0;
     let shouldBreak = !current
       || current.speaker !== word.speaker
+      || current.cueIndex !== word.cueIndex
+      || current.attributionSource !== word.timingSource
       || current.words.length >= 7
-      || gapSec > 0.75
+      || gapSec > CAPTION_LONG_PAUSE_SEC
       || /[.!?]$/.test(current.words[current.words.length - 1] || '');
     if (shouldBreak) {
       current = {
@@ -253,7 +412,7 @@ export function captionCuesFromClipTranscripts(clipTranscripts = []) {
         words: [],
         wordTimings: [],
         speaker: word.speaker,
-        attributionSource: 'clip-transcript',
+        attributionSource: word.timingSource,
         cueIndex: word.cueIndex,
         unmappedWordCount: 0,
       };
@@ -271,6 +430,26 @@ function hasTimedClipTranscriptWords(clipTranscripts = []) {
     Array.isArray(clip?.words)
     && clip.words.some((word) => cleanString(word?.word || word?.text, ''))
   ));
+}
+
+function captionAlignmentSummary(clipTranscripts = []) {
+  let clips = (Array.isArray(clipTranscripts) ? clipTranscripts : [])
+    .map((clip) => ({
+      itemIndex: Number.isFinite(Number(clip.itemIndex)) ? Number(clip.itemIndex) : null,
+      cueIndex: Number.isFinite(Number(clip.cueIndex)) ? Number(clip.cueIndex) : null,
+      speaker: cleanString(clip.speaker, ''),
+      ...clipCaptionAlignment(clip),
+    }))
+    .map(({ words, ...alignment }) => alignment);
+  let timedClips = clips.filter((clip) => clip.whisperWordCount > 0);
+  let authoredClipCount = timedClips.filter((clip) => clip.mode.startsWith('authored-')).length;
+  return {
+    clips,
+    timedClipCount: timedClips.length,
+    authoredClipCount,
+    fallbackClipCount: timedClips.length - authoredClipCount,
+    warningCount: clips.filter((clip) => clip.warning).length,
+  };
 }
 
 export function renderVtt(cues = []) {
@@ -295,13 +474,23 @@ export function buildCaptionCues({
   captionStyle = {},
 } = {}) {
   let useClipTranscripts = hasTimedClipTranscriptWords(clipTranscripts);
+  let alignment = captionAlignmentSummary(clipTranscripts);
   let cues = useClipTranscripts
     ? captionCuesFromClipTranscripts(clipTranscripts)
     : captionCuesFromTranscript(transcript, sourceCues);
+  let source = 'whisper+range-map';
+  if (useClipTranscripts && alignment.authoredClipCount === alignment.timedClipCount) {
+    source = 'authored+whisper-clip-range-map';
+  } else if (useClipTranscripts && alignment.authoredClipCount > 0) {
+    source = 'mixed-authored-whisper+clip-range-map';
+  } else if (useClipTranscripts) {
+    source = 'whisper+clip-range-map';
+  }
   return {
     cues,
     vtt: renderVtt(cues),
     ass: renderAss(cues, { captionStyle }),
-    source: useClipTranscripts ? 'whisper+clip-range-map' : 'whisper+range-map',
+    source,
+    alignment,
   };
 }

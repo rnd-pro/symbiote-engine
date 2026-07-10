@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  alignAuthoredCaptionWords,
   buildCaptionCues,
   captionCueHasWordTimings,
   captionAttributionForRange,
@@ -87,6 +88,104 @@ test('caption clip transcripts sort across clips and preserve speaker attributio
   assert.deepEqual(result[0].wordTimings.map((item) => item.text), ['first', 'phrase.']);
   assert.equal(result[2].wordTimings[0].startSec, 2);
   assert.equal(result.every((cue) => cue.attributionSource === 'clip-transcript'), true);
+});
+
+test('authored caption alignment preserves exact Whisper timing when token counts match', () => {
+  let result = alignAuthoredCaptionWords('UNIAPI routes correctly.', [
+    word('UN', 1, 1.2),
+    word('ePASS', 1.25, 1.6),
+    word('wrongly.', 1.7, 2.1),
+  ]);
+
+  assert.equal(result.mode, 'authored-identity');
+  assert.equal(result.warning, false);
+  assert.deepEqual(result.words, [
+    { text: 'UNIAPI', startSec: 1, endSec: 1.2 },
+    { text: 'routes', startSec: 1.25, endSec: 1.6 },
+    { text: 'correctly.', startSec: 1.7, endSec: 2.1 },
+  ]);
+
+  let fallback = alignAuthoredCaptionWords('', [
+    word('first', 2, 2.2),
+    word('second', 2, 2.2),
+  ]);
+  assert.deepEqual(fallback.words.map((item) => item.text), ['first', 'second']);
+});
+
+test('authored caption alignment resamples mismatched tokens without consuming long pauses', () => {
+  let result = alignAuthoredCaptionWords('The UNIAPI route works now.', [
+    word('The', 0, 0.2),
+    word('wrong', 0.25, 0.5),
+    word('works', 1.4, 1.65),
+    word('now.', 1.7, 2),
+  ]);
+
+  assert.equal(result.mode, 'authored-resampled');
+  assert.deepEqual(result.words.map((item) => item.text), ['The', 'UNIAPI', 'route', 'works', 'now.']);
+  assert.equal(result.words[0].startSec, 0);
+  assert.equal(result.words.at(-1).endSec, 2);
+  assert.equal(result.words.every((item) => item.endSec > item.startSec), true);
+  assert.equal(result.words.every((item, index) => index === 0 || item.startSec >= result.words[index - 1].endSec), true);
+  assert.equal(result.words.some((item) => item.startSec < 0.5 && item.endSec > 1.4), false);
+
+  let cues = captionCuesFromClipTranscripts([{
+    authoredText: 'The UNIAPI route works now.',
+    speaker: 'guide',
+    cueIndex: 0,
+    words: [
+      word('The', 0, 0.2),
+      word('wrong', 0.25, 0.5),
+      word('works', 1.4, 1.65),
+      word('now.', 1.7, 2),
+    ],
+  }]);
+  assert.deepEqual(cues.map((cue) => cue.words.join(' ')), ['The UNIAPI route', 'works now.']);
+  assert.equal(cues.every((cue) => cue.attributionSource === 'authored-clip-timing'), true);
+});
+
+test('caption builds expose authored, fallback, and mixed clip timing sources precisely', () => {
+  let authored = buildCaptionCues({
+    sequenceMode: 'sequential',
+    clipTranscripts: [{
+      authoredText: 'UNIAPI routes.',
+      speaker: 'guide',
+      cueIndex: 0,
+      words: [word('UN', 0, 0.2), word('ePASS', 0.2, 0.5)],
+    }],
+  });
+  assert.equal(authored.source, 'authored+whisper-clip-range-map');
+  assert.equal(authored.alignment.authoredClipCount, 1);
+  assert.match(authored.vtt, /UNIAPI routes\./);
+  assert.match(authored.ass, /UNIAPI/);
+
+  let mixed = buildCaptionCues({
+    sequenceMode: 'sequential',
+    clipTranscripts: [
+      {
+        authoredText: 'Exact text.',
+        speaker: 'guide',
+        cueIndex: 0,
+        words: [word('wrong', 0, 0.2), word('words.', 0.2, 0.5)],
+      },
+      {
+        speaker: 'guide',
+        cueIndex: 1,
+        words: [word('fallback', 0.55, 0.8)],
+      },
+    ],
+  });
+  assert.equal(mixed.source, 'mixed-authored-whisper+clip-range-map');
+  assert.deepEqual(mixed.cues.map((cue) => cue.attributionSource), ['authored-clip-timing', 'clip-transcript']);
+  assert.deepEqual(mixed.cues.map((cue) => cue.words.join(' ')), ['Exact text.', 'fallback']);
+
+  let missingTiming = buildCaptionCues({
+    transcript: { text: 'Whisper fallback', durationSec: 1 },
+    clipTranscripts: [{ authoredText: 'Authored text without timing.', words: [] }],
+  });
+  assert.equal(missingTiming.source, 'whisper+range-map');
+  assert.equal(missingTiming.alignment.clips.length, 1);
+  assert.equal(missingTiming.alignment.warningCount, 1);
+  assert.equal(missingTiming.alignment.clips[0].warningReason, 'missing-whisper-word-timings');
 });
 
 test('caption attribution chooses the largest cue overlap and reports unmapped ranges', () => {

@@ -24,6 +24,8 @@
   cleanup results into render proof state without parsing cleanup internals.
 - Added `render-captions` helpers for reusable Whisper caption cue attribution
   and VTT generation in provider-backed render pipelines.
+- Added authored caption alignment over Whisper word timings with pause-aware
+  karaoke timing, mixed-source attribution, and mismatch diagnostics.
 - Added `render-finalize` helpers for reusable frame-sequence encode args,
   audio concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest
   projection/state helpers.
