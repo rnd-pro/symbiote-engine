@@ -71,6 +71,10 @@ function normalizeRenderCapture(value) {
     workerCount: positiveInteger(capture.workerCount, 1, 'renderArtifact.capture.workerCount'),
     durationMs: optionalNonNegativeNumber(capture.durationMs, 'renderArtifact.capture.durationMs') ?? 0,
     throughputFps: optionalNonNegativeNumber(capture.throughputFps, 'renderArtifact.capture.throughputFps') ?? 0,
+    browserCloseTimeouts: optionalNonNegativeInteger(
+      capture.browserCloseTimeouts,
+      'renderArtifact.capture.browserCloseTimeouts',
+    ) ?? 0,
     frameTimeSource: cleanString(capture.frameTimeSource, mode === 'deterministic' ? 'page-render-clock' : 'wall-clock'),
     workerRanges,
   };

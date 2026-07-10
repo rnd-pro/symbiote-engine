@@ -608,6 +608,64 @@ test('local browser screencast provider renders deterministic ranges in parallel
   }
 });
 
+test('deterministic capture bounds a hanging browser close and records the timeout', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-browser-close-timeout-'));
+  let events = [];
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        let page = {
+          mouse: { click: async () => {} },
+          async setViewport() {},
+          async goto() {},
+          async evaluate(_fn, arg) {
+            if (arg?.frameContext) {
+              return {
+                presentedTimeMs: arg.frameContext.timeMs,
+                projectionId: `close-timeout:${arg.frameContext.frameIndex}`,
+              };
+            }
+            return { settled: true };
+          },
+          async screenshot() {},
+        };
+        return {
+          async newPage() { return page; },
+          async close() { await new Promise(() => {}); },
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+
+  let result = await provider.execute({
+    id: 'browser-close-timeout',
+    frameFormat: 'webp',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 34, frameCount: 1 },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+    renderClock: { mode: 'deterministic', path: '__fixture.renderAt', workerCount: 1 },
+  }, {
+    artifactKind: 'frame-sequence',
+    browserProfileRoot: tmp,
+    browserCloseTimeoutMs: 10,
+    onStage(event) { events.push(event); },
+  });
+
+  assert.equal(result.capture.browserCloseTimeouts, 1);
+  assert.ok(events.some((event) => (
+    event.stage === 'browser:close.timeout'
+      && event.workerIndex === 0
+      && event.timeoutMs === 100
+  )));
+  assert.ok(events.some((event) => event.stage === 'browser:closed' && event.timedOut === true));
+});
+
 test('deterministic capture rejects stateful engine timeline actions', async () => {
   let provider = createLocalBrowserScreencastProvider({
     puppeteer: { async launch() { throw new Error('must not launch'); } },

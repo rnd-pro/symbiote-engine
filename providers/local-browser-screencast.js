@@ -549,6 +549,24 @@ function emitStage(executionOptions, stage, detail = {}) {
   });
 }
 
+async function closeBrowserWorker(browser, executionOptions, detail = {}) {
+  let timeoutMs = Math.max(100, Math.round(Number(executionOptions.browserCloseTimeoutMs) || 5000));
+  emitStage(executionOptions, 'browser:close', detail);
+  let timer;
+  let close = Promise.resolve()
+    .then(() => browser.close())
+    .then(() => true, () => true);
+  let timedOut = await Promise.race([
+    close.then(() => false),
+    new Promise((resolveTimeout) => {
+      timer = setTimeout(() => resolveTimeout(true), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+  if (timedOut) emitStage(executionOptions, 'browser:close.timeout', { ...detail, timeoutMs });
+  emitStage(executionOptions, 'browser:closed', { ...detail, timedOut });
+  return { timedOut, timeoutMs };
+}
+
 function wantsFrameSequenceArtifact(job, executionOptions = {}) {
   let requestedKind = cleanString(
     executionOptions.artifactKind || job.artifactKind || job.output?.kind,
@@ -652,7 +670,7 @@ async function prepareBrowserWorker({
       warmupDurationMs: Date.now() - workerStartedAt,
     };
   } catch (error) {
-    await browser.close().catch(() => {});
+    await closeBrowserWorker(browser, executionOptions, detail);
     throw error;
   }
 }
@@ -839,11 +857,13 @@ async function executeDeterministicCapture({
         .map((result) => result.metric)
         .sort((a, b) => a.workerIndex - b.workerIndex),
     };
+    let closeResults = [];
     for (let worker of activeWorkers.splice(0)) {
-      emitStage(executionOptions, 'browser:close', { workerIndex: worker.range.workerIndex });
-      await worker.browser.close().catch(() => {});
-      emitStage(executionOptions, 'browser:closed', { workerIndex: worker.range.workerIndex });
+      closeResults.push(await closeBrowserWorker(worker.browser, executionOptions, {
+        workerIndex: worker.range.workerIndex,
+      }));
     }
+    capture.browserCloseTimeouts = closeResults.filter((result) => result.timedOut).length;
     emitStage(executionOptions, 'capture:done', {
       frames: video.frameCount,
       workerCount: ranges.length,
@@ -928,9 +948,9 @@ async function executeDeterministicCapture({
     return artifact;
   } finally {
     for (let worker of activeWorkers.splice(0)) {
-      emitStage(executionOptions, 'browser:close', { workerIndex: worker.range.workerIndex });
-      await worker.browser.close().catch(() => {});
-      emitStage(executionOptions, 'browser:closed', { workerIndex: worker.range.workerIndex });
+      await closeBrowserWorker(worker.browser, executionOptions, {
+        workerIndex: worker.range.workerIndex,
+      });
     }
     pool.dispose();
   }
@@ -1241,9 +1261,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
         emitStage(executionOptions, 'screencast:done', artifact);
         return artifact;
       } finally {
-        emitStage(executionOptions, 'browser:close');
-        await browser.close().catch(() => {});
-        emitStage(executionOptions, 'browser:closed');
+        await closeBrowserWorker(browser, executionOptions);
       }
     },
   };

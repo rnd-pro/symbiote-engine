@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Bound browser worker shutdown and expose `capture.browserCloseTimeouts` so a
+  disconnected Playwright close promise cannot block completed render frames.
 - Added deterministic browser render-clock capture, bounded parallel worker
   coordination, ordered frame progress, and capture performance metadata.
 - Added audio provider contract helpers, an engine-owned provider job queue,
