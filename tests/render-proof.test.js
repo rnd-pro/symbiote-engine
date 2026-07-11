@@ -2,8 +2,12 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
+  RENDER_FRAME_COMPLETENESS_PROOF_VERSION,
+  RENDER_PERFORMANCE_PROOF_VERSION,
   buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
+  buildRenderFrameCompletenessProof,
+  buildRenderPerformanceProof,
   countClipOverlaps,
   durationDriftMs,
   findProbeStream,
@@ -11,6 +15,68 @@ import {
   renderAuthorityDurationSec,
   streamDurationSec,
 } from '../render-proof.js';
+
+test('frame completeness proof reuses strict completion semantics and reports every defect class', () => {
+  let pass = buildRenderFrameCompletenessProof({
+    expectedFrameCount: 4,
+    frames: [{ index: 0 }, { index: 1 }, { index: 2 }, { index: 3 }],
+  });
+  let fail = buildRenderFrameCompletenessProof({
+    expectedFrameCount: 4,
+    frames: [{ index: 0 }, { index: 2 }, { index: 2 }, { index: 1 }, { index: 9 }],
+  });
+
+  assert.equal(pass.version, RENDER_FRAME_COMPLETENESS_PROOF_VERSION);
+  assert.equal(pass.ok, true);
+  assert.equal(pass.contiguousFrameCount, 4);
+  assert.equal(fail.ok, false);
+  assert.deepEqual(fail.missingFrames, [3]);
+  assert.deepEqual(fail.duplicateFrames, [2]);
+  assert.deepEqual(fail.outOfRangeFrames, [{ position: 4, index: 9 }]);
+  assert.deepEqual(fail.reorderedTransitions, [{ position: 3, previous: 2, index: 1 }]);
+});
+
+test('performance proof derives deterministic throughput and resource verdicts from samples', () => {
+  let pass = buildRenderPerformanceProof({
+    frameCount: 300,
+    fps: 30,
+    captureDurationMs: 9000,
+    encodeDurationMs: 8000,
+    resourceSamples: [{ atMs: 0, rssBytes: 1000 }, { atMs: 5000, rssBytes: 1500 }],
+    previewSamples: [{ atMs: 0, decodedBytes: 400 }, { atMs: 5000, decodedBytes: 800 }],
+    thresholds: {
+      minCaptureFps: 30,
+      minEncodeFps: 30,
+      maxCaptureRealtimeRatio: 1,
+      maxPeakRssBytes: 2000,
+      maxPreviewWorkingSetBytes: 1000,
+    },
+  });
+  let fail = buildRenderPerformanceProof({
+    frameCount: 300,
+    fps: 30,
+    captureDurationMs: 12000,
+    encodeDurationMs: 15000,
+    peakRssBytes: 3000,
+    peakPreviewWorkingSetBytes: 1200,
+    thresholds: {
+      minCaptureFps: 30,
+      minEncodeFps: 30,
+      maxCaptureRealtimeRatio: 1,
+      maxPeakRssBytes: 2000,
+      maxPreviewWorkingSetBytes: 1000,
+    },
+  });
+
+  assert.equal(pass.version, RENDER_PERFORMANCE_PROOF_VERSION);
+  assert.equal(pass.ok, true);
+  assert.equal(pass.captureFps, 33.333);
+  assert.equal(pass.encodeFps, 37.5);
+  assert.equal(pass.peakRssBytes, 1500);
+  assert.equal(pass.peakPreviewWorkingSetBytes, 800);
+  assert.equal(fail.ok, false);
+  assert.deepEqual(Object.values(fail.checks), [false, false, false, false, false]);
+});
 
 function ffprobe({ videoDuration = '1.000000', audioDuration = '1.000000', videoCodec = 'h264', audioCodec = 'aac' } = {}) {
   let streams = [

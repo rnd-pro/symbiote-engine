@@ -156,8 +156,8 @@ symbiote-engine inspect workflow.json --json
   job patches, queue snapshots, terminal error factories, and stable render
   error taxonomy helpers.
 - `symbiote-engine/render-proof` — ffprobe stream normalization,
-  audio/speaker layer proof, and A/V sync proof helpers for provider-backed
-  render pipelines.
+  audio/speaker layer proof, A/V sync, frame completeness, and pure
+  throughput/resource proof helpers for provider-backed render pipelines.
 - `symbiote-engine/render-jobs` — engine-owned render provider job queue
   primitives with progress, timeout, cancel, cache-hit, and cleanup events.
 - `symbiote-engine/render-workers` — contiguous frame-range partitioning and

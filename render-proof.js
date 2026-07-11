@@ -1,5 +1,130 @@
 import { captionTranscriptDurationSec } from './render-captions.js';
 import { cleanString, finiteNonNegativeNumber, finitePositiveNumber } from './render-utils.js';
+import { createRenderFrameCompletionTracker } from './render-workers.js';
+
+export const RENDER_FRAME_COMPLETENESS_PROOF_VERSION = 'render-frame-completeness-v1';
+export const RENDER_PERFORMANCE_PROOF_VERSION = 'render-performance-v1';
+
+function positiveInteger(value, path) {
+  let number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) throw new TypeError(`${path} must be a positive integer`);
+  return number;
+}
+
+function frameIndex(value) {
+  return Number(typeof value === 'object' && value !== null ? value.index : value);
+}
+
+export function buildRenderFrameCompletenessProof(options = {}) {
+  let expectedFrameCount = positiveInteger(options.expectedFrameCount, 'expectedFrameCount');
+  let frames = Array.isArray(options.frames) ? options.frames : [];
+  let tracker = createRenderFrameCompletionTracker(expectedFrameCount);
+  let seen = new Set();
+  let duplicateFrames = [];
+  let outOfRangeFrames = [];
+  let reorderedTransitions = [];
+  let previous = -1;
+  for (let [position, item] of frames.entries()) {
+    let index = frameIndex(item);
+    if (!Number.isInteger(index) || index < 0 || index >= expectedFrameCount) {
+      outOfRangeFrames.push({ position, index: Number.isFinite(index) ? index : null });
+      continue;
+    }
+    if (index < previous) reorderedTransitions.push({ position, previous, index });
+    previous = index;
+    if (seen.has(index)) {
+      duplicateFrames.push(index);
+      continue;
+    }
+    seen.add(index);
+    tracker.mark(index);
+  }
+  let missingFrames = [];
+  for (let index = 0; index < expectedFrameCount; index += 1) {
+    if (!seen.has(index)) missingFrames.push(index);
+  }
+  let errors = [];
+  if (missingFrames.length) errors.push(`${missingFrames.length} frame indices are missing`);
+  if (duplicateFrames.length) errors.push(`${duplicateFrames.length} frame indices are duplicated`);
+  if (outOfRangeFrames.length) errors.push(`${outOfRangeFrames.length} frame indices are outside the expected range`);
+  if (reorderedTransitions.length) errors.push(`${reorderedTransitions.length} frame transitions are reordered`);
+  return {
+    version: RENDER_FRAME_COMPLETENESS_PROOF_VERSION,
+    ok: errors.length === 0,
+    errors,
+    expectedFrameCount,
+    observedFrameCount: frames.length,
+    uniqueFrameCount: seen.size,
+    contiguousFrameCount: tracker.contiguousFrames,
+    missingFrames,
+    duplicateFrames,
+    outOfRangeFrames,
+    reorderedTransitions,
+  };
+}
+
+function peakSample(samples, field) {
+  return (Array.isArray(samples) ? samples : []).reduce((peak, sample) => {
+    let value = finiteNonNegativeNumber(sample?.[field], 0);
+    return Math.max(peak, value);
+  }, 0);
+}
+
+export function buildRenderPerformanceProof(options = {}) {
+  let frameCount = positiveInteger(options.frameCount, 'frameCount');
+  let fps = finitePositiveNumber(options.fps, 0);
+  let captureDurationMs = finitePositiveNumber(options.captureDurationMs, 0);
+  let encodeDurationMs = finitePositiveNumber(options.encodeDurationMs, 0);
+  if (!fps) throw new TypeError('fps must be positive');
+  if (!captureDurationMs) throw new TypeError('captureDurationMs must be positive');
+  if (!encodeDurationMs) throw new TypeError('encodeDurationMs must be positive');
+  let thresholds = {
+    minCaptureFps: finitePositiveNumber(options.thresholds?.minCaptureFps, fps),
+    minEncodeFps: finitePositiveNumber(options.thresholds?.minEncodeFps, fps),
+    maxCaptureRealtimeRatio: finitePositiveNumber(options.thresholds?.maxCaptureRealtimeRatio, 1),
+    maxPeakRssBytes: finitePositiveNumber(options.thresholds?.maxPeakRssBytes, Number.MAX_SAFE_INTEGER),
+    maxPreviewWorkingSetBytes: finitePositiveNumber(options.thresholds?.maxPreviewWorkingSetBytes, Number.MAX_SAFE_INTEGER),
+  };
+  let peakRssBytes = Math.max(
+    finiteNonNegativeNumber(options.peakRssBytes, 0),
+    peakSample(options.resourceSamples, 'rssBytes'),
+  );
+  let peakPreviewWorkingSetBytes = Math.max(
+    finiteNonNegativeNumber(options.peakPreviewWorkingSetBytes, 0),
+    peakSample(options.previewSamples, 'decodedBytes'),
+  );
+  let mediaDurationMs = frameCount / fps * 1000;
+  let captureFps = frameCount / (captureDurationMs / 1000);
+  let encodeFps = frameCount / (encodeDurationMs / 1000);
+  let captureRealtimeRatio = captureDurationMs / mediaDurationMs;
+  let checks = {
+    captureFps: captureFps >= thresholds.minCaptureFps,
+    encodeFps: encodeFps >= thresholds.minEncodeFps,
+    captureRealtimeRatio: captureRealtimeRatio <= thresholds.maxCaptureRealtimeRatio,
+    peakRssBytes: peakRssBytes <= thresholds.maxPeakRssBytes,
+    peakPreviewWorkingSetBytes: peakPreviewWorkingSetBytes <= thresholds.maxPreviewWorkingSetBytes,
+  };
+  let errors = Object.entries(checks)
+    .filter(([, passed]) => !passed)
+    .map(([name]) => `${name} exceeds its locked threshold`);
+  return {
+    version: RENDER_PERFORMANCE_PROOF_VERSION,
+    ok: errors.length === 0,
+    errors,
+    frameCount,
+    fps,
+    mediaDurationMs: Math.round(mediaDurationMs),
+    captureDurationMs: Math.round(captureDurationMs),
+    encodeDurationMs: Math.round(encodeDurationMs),
+    captureFps: Math.round(captureFps * 1000) / 1000,
+    encodeFps: Math.round(encodeFps * 1000) / 1000,
+    captureRealtimeRatio: Math.round(captureRealtimeRatio * 1000) / 1000,
+    peakRssBytes,
+    peakPreviewWorkingSetBytes,
+    thresholds,
+    checks,
+  };
+}
 
 export function normalizeProbeStreams(ffprobe = {}) {
   return Array.isArray(ffprobe?.streams) ? ffprobe.streams : [];

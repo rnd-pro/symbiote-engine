@@ -127,8 +127,12 @@ export {
   mapRenderEventToProgress,
 } from './render-lifecycle.js';
 export {
+  RENDER_FRAME_COMPLETENESS_PROOF_VERSION,
+  RENDER_PERFORMANCE_PROOF_VERSION,
   buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
+  buildRenderFrameCompletenessProof,
+  buildRenderPerformanceProof,
   countClipOverlaps,
   durationDriftMs,
   findProbeStream,

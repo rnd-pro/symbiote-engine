@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added pure frame-completeness and render-performance proof helpers for
+  missing/duplicate/reordered frame detection, capture/encode throughput,
+  realtime ratio, and bounded resource verdicts from caller-owned samples.
 - Bound browser worker shutdown, including aborts during launch, and expose
   `capture.browserCloseTimeouts` so a disconnected browser-adapter close promise
   cannot block completed render frames.
