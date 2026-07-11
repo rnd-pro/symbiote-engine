@@ -2,9 +2,12 @@
 
 ## Unreleased
 
-- Added mandatory canonical synthesis-receipt verification for local TTS audio,
-  including request, artifact, HMAC, voice, language, sample-rate, and duration
-  checks before content-addressed artifact writes.
+- Added mandatory canonical synthesis-receipt v2 verification for local TTS
+  audio, including strict HMAC-bound speaker-probe verdicts, distances and
+  thresholds, normalization evidence, request, artifact, voice, language,
+  sample-rate, and duration checks before content-addressed artifact writes.
+- Invalidated pre-v2 TTS cache keys and rejected v1 synthesis receipts on the
+  active-development contract.
 - Preserved verified synthesis receipts through provider queue results, cache
   hits, and artifact metadata, with deterministic sidecar conflict rejection.
 - Added pure frame-completeness and render-performance proof helpers for

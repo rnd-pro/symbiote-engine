@@ -39,8 +39,31 @@ function signedReceipt(item, bytes = WAV_BYTES, overrides = {}) {
     requestHash: createAudioSynthesisRequestHash(item),
     requestedVoiceRef: item.voiceRef,
     resolvedVoiceRef: 'qwen3:speaker:vivian',
-    speakerAttestation: 'opaque-speaker-hmac-digest',
-    model: { family: 'qwen3', versionToken: 'test' },
+    speakerAttestation: 'c'.repeat(64),
+    speakerProbe: {
+      probeFamily: 'speaker-embedding-v1',
+      probeVersionToken: 'a'.repeat(64),
+      enrollmentRevision: 'b'.repeat(64),
+      segmentationRevision: 'segments-v1',
+      segmentCount: 3,
+      enrolledVoiceMatch: true,
+      segmentsConsistent: true,
+      maxEnrolledDistance: 0.2,
+      minOtherVoiceMargin: 0.4,
+      maxSegmentDistance: 0.15,
+      thresholds: {
+        enrolledDistanceMax: 0.3,
+        otherVoiceMarginMin: 0.25,
+        segmentDistanceMax: 0.2,
+      },
+    },
+    normalization: {
+      version: 'loudnorm-v1',
+      applied: true,
+      targetLufs: -16,
+      truePeakLimitDbfs: -1.5,
+    },
+    model: { family: 'qwen3', versionToken: 'd'.repeat(64) },
     language: item.language,
     sampleRate: 24000,
     durationMs: 1250,
@@ -194,6 +217,29 @@ test('local audio TTS rejects missing or malformed synthesis receipts before art
   }
 });
 
+test('local audio TTS accepts signed non-normalized bytes only for normalize false', async () => {
+  let item = synthesisItem({ normalize: false });
+  let receipt = signedReceipt(item, WAV_BYTES, {
+    normalization: { version: 'loudnorm-v1', applied: false, targetLufs: -16, truePeakLimitDbfs: -1.5 },
+  });
+  let provider = createLocalAudioTtsProvider({
+    endpoint: 'http://local-audio.test',
+    artifactStore: { put: async (_bytes, metadata) => ({ artifactId: `sha256:${receipt.artifactHash}`, metadata }) },
+    receiptSecret: RECEIPT_SECRET,
+    fetch: async () => response({
+      headers: {
+        'content-type': 'audio/wav',
+        'x-audio-duration-sec': '1.25',
+        'x-audio-sample-rate': '24000',
+        'x-audio-receipt': receiptHeader(receipt),
+      },
+      body: WAV_BYTES,
+    }),
+  });
+  let result = await provider.execute({ kind: 'tts', providerId: 'local-tts', input: item });
+  assert.equal(result.synthesisReceipt.normalization.applied, false);
+});
+
 test('local audio TTS rejects signed receipts for the wrong request or artifact bytes', async () => {
   let cases = [
     {
@@ -255,6 +301,103 @@ test('local audio TTS rejects invalid receipt HMAC and response consistency mism
     await assert.rejects(
       () => provider.execute({ kind: 'tts', providerId: 'local-tts', input: synthesisItem() }),
       (error) => error.code === fixture.code,
+    );
+  }
+});
+
+test('local audio TTS rejects tampered, negative, and threshold-failing v2 evidence', async () => {
+  let tampered = signedReceipt(synthesisItem());
+  tampered.speakerProbe.maxEnrolledDistance = 0.21;
+  let probe = signedReceipt(synthesisItem()).speakerProbe;
+  let fixtures = [
+    { code: 'AUDIO_SYNTHESIS_RECEIPT_HMAC_INVALID', receipt: tampered },
+    {
+      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
+      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
+        speakerProbe: { ...probe, enrolledVoiceMatch: false },
+      }),
+    },
+    {
+      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
+      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
+        speakerProbe: { ...probe, segmentsConsistent: false },
+      }),
+    },
+    {
+      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
+      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
+        speakerProbe: { ...probe, maxEnrolledDistance: 0.31 },
+      }),
+    },
+    {
+      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
+      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
+        speakerProbe: { ...probe, minOtherVoiceMargin: 0.24 },
+      }),
+    },
+    {
+      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
+      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
+        speakerProbe: { ...probe, maxSegmentDistance: 0.21 },
+      }),
+    },
+    {
+      code: 'AUDIO_SYNTHESIS_RECEIPT_NORMALIZATION_FAILED',
+      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
+        normalization: { ...signedReceipt(synthesisItem()).normalization, applied: false },
+      }),
+    },
+  ];
+  for (let fixture of fixtures) {
+    let provider = createLocalAudioTtsProvider({
+      endpoint: 'http://local-audio.test',
+      artifactStore: { put: async () => assert.fail('unverified audio must not be written') },
+      receiptSecret: RECEIPT_SECRET,
+      fetch: async () => response({
+        headers: {
+          'content-type': 'audio/wav',
+          'x-audio-duration-sec': '1.25',
+          'x-audio-sample-rate': '24000',
+          'x-audio-receipt': receiptHeader(fixture.receipt),
+        },
+        body: WAV_BYTES,
+      }),
+    });
+    await assert.rejects(
+      () => provider.execute({ kind: 'tts', providerId: 'local-tts', input: synthesisItem() }),
+      (error) => error.code === fixture.code,
+    );
+  }
+});
+
+test('local audio TTS rejects out-of-range, private-field, and stale v1 receipts', async () => {
+  let outOfRangeProbe = signedReceipt(synthesisItem());
+  outOfRangeProbe.speakerProbe.maxSegmentDistance = 2.01;
+  let outOfRangeNormalization = signedReceipt(synthesisItem());
+  outOfRangeNormalization.normalization.targetLufs = -40;
+  let privateField = signedReceipt(synthesisItem());
+  privateField.speakerProbe.embedding = [0.1, 0.2];
+  let staleV1 = signedReceipt(synthesisItem());
+  staleV1.receiptVersion = 'symbiote-audio-synthesis-receipt-v1';
+  let fixtures = [outOfRangeProbe, outOfRangeNormalization, privateField, staleV1];
+  for (let receipt of fixtures) {
+    let provider = createLocalAudioTtsProvider({
+      endpoint: 'http://local-audio.test',
+      artifactStore: { put: async () => assert.fail('invalid receipt must not be written') },
+      receiptSecret: RECEIPT_SECRET,
+      fetch: async () => response({
+        headers: {
+          'content-type': 'audio/wav',
+          'x-audio-duration-sec': '1.25',
+          'x-audio-sample-rate': '24000',
+          'x-audio-receipt': receiptHeader(receipt),
+        },
+        body: WAV_BYTES,
+      }),
+    });
+    await assert.rejects(
+      () => provider.execute({ kind: 'tts', providerId: 'local-tts', input: synthesisItem() }),
+      (error) => error.code === 'AUDIO_SYNTHESIS_RECEIPT_INVALID',
     );
   }
 });

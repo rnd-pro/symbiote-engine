@@ -146,9 +146,12 @@ symbiote-engine inspect workflow.json --json
   render-provider, and audio-provider contract helpers.
 - `symbiote-engine/artifacts` — Node-only content-addressed artifact store.
 - `symbiote-engine/providers/local-audio-tts.js` — Node-only local TTS transport
-  with mandatory `X-Audio-Receipt` verification. Configure `receiptSecret` with
-  at least 32 bytes; missing, malformed, or inconsistent receipts fail before
-  artifact writes.
+  with mandatory canonical v2 `X-Audio-Receipt` verification. The HMAC-bound
+  receipt requires exact speaker-probe verdicts, measured distances and signed
+  thresholds, plus loudness/true-peak normalization evidence matching the public
+  request. Configure
+  `receiptSecret` with at least 32 bytes; v1, malformed, negative, out-of-range,
+  threshold-failing, or inconsistent receipts fail before artifact writes.
 - `symbiote-engine/provider-jobs` — engine-owned provider job queue primitives
   with model-service readiness gating.
 - `symbiote-engine/render-cache` — Node-only frame cache keys, in-memory frame

@@ -34,8 +34,31 @@ function testReceipt(item, bytes = Buffer.from('RIFFfakewav'), overrides = {}) {
     requestHash: createAudioSynthesisRequestHash(item),
     requestedVoiceRef: item.voiceRef,
     resolvedVoiceRef: 'qwen3:speaker:vivian',
-    speakerAttestation: 'opaque-speaker-hmac-digest',
-    model: { family: 'qwen3', versionToken: 'test' },
+    speakerAttestation: 'c'.repeat(64),
+    speakerProbe: {
+      probeFamily: 'speaker-embedding-v1',
+      probeVersionToken: 'a'.repeat(64),
+      enrollmentRevision: 'b'.repeat(64),
+      segmentationRevision: 'segments-v1',
+      segmentCount: 3,
+      enrolledVoiceMatch: true,
+      segmentsConsistent: true,
+      maxEnrolledDistance: 0.2,
+      minOtherVoiceMargin: 0.4,
+      maxSegmentDistance: 0.15,
+      thresholds: {
+        enrolledDistanceMax: 0.3,
+        otherVoiceMarginMin: 0.25,
+        segmentDistanceMax: 0.2,
+      },
+    },
+    normalization: {
+      version: 'loudnorm-v1',
+      applied: true,
+      targetLufs: -16,
+      truePeakLimitDbfs: -1.5,
+    },
+    model: { family: 'qwen3', versionToken: 'd'.repeat(64) },
     language: item.language,
     sampleRate: 24000,
     durationMs: 1200,
@@ -165,7 +188,7 @@ test('audio provider registry executes selected provider and protects kind bound
   );
 });
 
-test('audio cache keys include provider, settings, model, voice, text, language, and style', () => {
+test('audio cache keys include receipt version, provider, settings, model, voice, text, language, and style', () => {
   let base = createAudioCacheKey({
     kind: 'tts',
     providerId: 'local-qwen3',
@@ -247,6 +270,19 @@ test('audio cache keys include provider, settings, model, voice, text, language,
       style: 'warm',
     },
   }));
+  assert.throws(
+    () => createAudioCacheKey({
+      synthesisReceiptVersion: 'symbiote-audio-synthesis-receipt-v1',
+      kind: 'tts',
+      providerId: 'local-qwen3',
+      input: { text: 'Hola', language: 'es', voiceRef: 'voice:mateo-es-v1' },
+    }),
+    /audioCache\.synthesisReceiptVersion.*symbiote-audio-synthesis-receipt-v2/,
+  );
+  assert.equal(
+    createAudioCacheKey({ kind: 'transcribe', synthesisReceiptVersion: 'ignored-v1', input: { audioRef: ARTIFACT_A } }),
+    createAudioCacheKey({ kind: 'transcribe', input: { audioRef: ARTIFACT_A } }),
+  );
 });
 
 test('file artifact store writes content-addressed audio metadata and stable refs', async () => {
