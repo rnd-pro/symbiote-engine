@@ -66,6 +66,28 @@ function normalizeRenderCapture(value) {
       captureDurationMs: optionalNonNegativeNumber(range.captureDurationMs, `renderArtifact.capture.workerRanges[${index}].captureDurationMs`) ?? 0,
     };
   });
+  let seamProofs = (Array.isArray(capture.seamProofs) ? capture.seamProofs : []).map((proof, index) => {
+    requireObject(proof, `renderArtifact.capture.seamProofs[${index}]`);
+    return {
+      frame: optionalNonNegativeInteger(proof.frame, `renderArtifact.capture.seamProofs[${index}].frame`) ?? 0,
+      elapsedMs: optionalNonNegativeNumber(proof.elapsedMs, `renderArtifact.capture.seamProofs[${index}].elapsedMs`) ?? 0,
+      workers: (Array.isArray(proof.workers) ? proof.workers : []).map((worker, workerIndex) => (
+        optionalNonNegativeInteger(worker, `renderArtifact.capture.seamProofs[${index}].workers[${workerIndex}]`) ?? 0
+      )),
+      contentDigest: cleanString(proof.contentDigest, ''),
+      peerContentDigest: cleanString(proof.peerContentDigest, ''),
+      contentMatches: proof.contentMatches === true,
+      pixelHash: cleanString(proof.pixelHash, ''),
+      peerPixelHash: cleanString(proof.peerPixelHash, ''),
+      exactPixelsMatch: proof.exactPixelsMatch === true,
+      ssim: optionalNonNegativeNumber(proof.ssim, `renderArtifact.capture.seamProofs[${index}].ssim`) ?? 0,
+      requiredSsim: optionalNonNegativeNumber(
+        proof.requiredSsim,
+        `renderArtifact.capture.seamProofs[${index}].requiredSsim`,
+      ) ?? 0,
+      pixelsMatch: proof.pixelsMatch === true,
+    };
+  });
   return {
     mode,
     workerCount: positiveInteger(capture.workerCount, 1, 'renderArtifact.capture.workerCount'),
@@ -76,6 +98,8 @@ function normalizeRenderCapture(value) {
       'renderArtifact.capture.browserCloseTimeouts',
     ) ?? 0,
     frameTimeSource: cleanString(capture.frameTimeSource, mode === 'deterministic' ? 'page-render-clock' : 'wall-clock'),
+    setupStateHash: cleanString(capture.setupStateHash, ''),
+    seamProofs,
     workerRanges,
   };
 }

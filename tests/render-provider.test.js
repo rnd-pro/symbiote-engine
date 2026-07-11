@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -11,6 +11,11 @@ import {
   normalizeRenderProvider,
 } from '../contracts/render-provider.js';
 import { createLocalBrowserScreencastProvider } from '../providers/local-browser-screencast.js';
+
+const TEST_SETUP_STATE = Object.freeze({
+  exportPath: '__fixture.exportState',
+  importPath: '__fixture.importState',
+});
 
 test('render provider contract validates providers and rejects duplicate ids', async () => {
   let first = {
@@ -529,12 +534,19 @@ test('local browser screencast provider renders deterministic ranges in parallel
         mouse: { click: async () => {} },
         async setViewport() {},
         async goto() { pageEvents.push('goto'); },
+        async waitForFunction() {},
         async evaluate(_fn, arg) {
+          if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1, layout: 'canonical' };
+          if (arg?.methodParts?.at(-1) === 'importState') {
+            pageEvents.push('setup-state:import');
+            return { imported: true };
+          }
           if (arg?.frameContext) {
             pageEvents.push(`render:${arg.frameContext.frameIndex}`);
             return {
               presentedTimeMs: arg.frameContext.timeMs,
               projectionId: `fixture:${arg.frameContext.frameIndex}`,
+              contentDigest: `content:${arg.frameContext.frameIndex}`,
             };
           }
           if (arg?.settleFrames != null) {
@@ -546,6 +558,7 @@ test('local browser screencast provider renders deterministic ranges in parallel
         async screenshot(options) {
           let frame = Number(options.path.match(/frame-(\d+)/)?.[1]);
           pageEvents.push(`screenshot:${frame}`);
+          await writeFile(options.path, `frame:${frame}${options.path.includes('.seam-') ? ':proof' : ''}`);
         },
       };
       pages.push(pageEvents);
@@ -559,7 +572,7 @@ test('local browser screencast provider renders deterministic ranges in parallel
     puppeteer,
     cwd: tmp,
     framesRoot: tmp,
-    execFile: async () => {},
+    execFile: async () => ({ stderr: 'SSIM All:0.9999995' }),
   });
 
   let result = await provider.execute({
@@ -577,6 +590,7 @@ test('local browser screencast provider renders deterministic ranges in parallel
       workerCount: 2,
       settleFrames: 2,
       timeoutMs: 1000,
+      setupState: TEST_SETUP_STATE,
     },
   }, {
     artifactKind: 'frame-sequence',
@@ -591,6 +605,13 @@ test('local browser screencast provider renders deterministic ranges in parallel
   assert.deepEqual(result.frameFiles.map((frame) => frame.elapsedMs), [0, 33, 67, 100, 133, 167]);
   assert.equal(result.capture.mode, 'deterministic');
   assert.equal(result.capture.workerCount, 2);
+  assert.equal(result.capture.seamProofs.length, 3);
+  assert.equal(result.capture.seamProofs[0].frame, 3);
+  assert.equal(result.capture.seamProofs[0].contentMatches, true);
+  assert.equal(result.capture.seamProofs[0].pixelsMatch, true);
+  assert.equal(result.capture.seamProofs[0].exactPixelsMatch, false);
+  assert.equal(result.capture.seamProofs[0].ssim, 0.9999995);
+  assert.match(result.capture.setupStateHash, /^[a-f0-9]{64}$/);
   assert.deepEqual(result.capture.workerRanges.map((range) => [range.startFrame, range.endFrame]), [
     [0, 2],
     [3, 5],
@@ -608,6 +629,64 @@ test('local browser screencast provider renders deterministic ranges in parallel
   }
 });
 
+test('parallel deterministic capture fails closed when worker seam content differs', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-seam-mismatch-'));
+  let launchIndex = 0;
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        let workerIndex = launchIndex++;
+        let page = {
+          mouse: { click: async () => {} },
+          async setViewport() {},
+          async goto() {},
+          async waitForFunction() {},
+          async evaluate(_fn, arg) {
+            if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1 };
+            if (arg?.methodParts?.at(-1) === 'importState') return { imported: true };
+            if (arg?.frameContext) {
+              return {
+                presentedTimeMs: arg.frameContext.timeMs,
+                projectionId: `seam:${arg.frameContext.frameIndex}`,
+                contentDigest: `worker:${workerIndex}`,
+              };
+            }
+            return { settled: true };
+          },
+          async screenshot(options) { await writeFile(options.path, 'same pixels'); },
+        };
+        return { async newPage() { return page; }, async close() {} };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  });
+  await assert.rejects(provider.execute({
+    id: 'seam-mismatch',
+    frameFormat: 'webp',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 67, frameCount: 2 },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 2,
+      setupState: TEST_SETUP_STATE,
+    },
+  }, {
+    artifactKind: 'frame-sequence',
+    browserProfileRoot: tmp,
+  }), (error) => (
+    error?.code === 'RENDER_SEAM_MISMATCH'
+      && error?.proof?.contentMatches === false
+      && error?.proof?.pixelsMatch === true
+  ));
+});
+
 test('deterministic capture bounds a hanging browser close and records the timeout', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-browser-close-timeout-'));
   let events = [];
@@ -618,6 +697,7 @@ test('deterministic capture bounds a hanging browser close and records the timeo
           mouse: { click: async () => {} },
           async setViewport() {},
           async goto() {},
+          async waitForFunction() {},
           async evaluate(_fn, arg) {
             if (arg?.frameContext) {
               return {
@@ -696,6 +776,24 @@ test('parallel capture requires a deterministic render clock', async () => {
   }, { artifactKind: 'frame-sequence' }), /parallel capture requires renderJob\.renderClock/);
 });
 
+test('parallel deterministic capture requires canonical setup state handoff', async () => {
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: { async launch() { throw new Error('must not launch'); } },
+    execFile: async () => {},
+  });
+  await assert.rejects(provider.execute({
+    id: 'missing-setup-state',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 100, frameCount: 3 },
+    timeline: [],
+    renderClock: { mode: 'deterministic', path: '__fixture.renderAt', workerCount: 2 },
+  }, { artifactKind: 'frame-sequence' }), (error) => (
+    error?.code === 'RENDER_SETUP_STATE_REQUIRED'
+      && /requires renderJob\.renderClock\.setupState/.test(error.message)
+  ));
+});
+
 test('deterministic worker failure aborts and closes the entire pool', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-worker-failure-'));
   let launchIndex = 0;
@@ -709,11 +807,18 @@ test('deterministic worker failure aborts and closes the entire pool', async () 
           mouse: { click: async () => {} },
           async setViewport() {},
           async goto() {},
+          async waitForFunction() {},
           async evaluate(_fn, arg) {
+            if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1 };
+            if (arg?.methodParts?.at(-1) === 'importState') return { imported: true };
             if (arg?.frameContext && workerIndex === 0) throw new Error('render hook failed');
             if (arg?.frameContext) {
               await new Promise((resolve) => setTimeout(resolve, 20));
-              return { presentedTimeMs: arg.frameContext.timeMs, projectionId: 'slow' };
+              return {
+                presentedTimeMs: arg.frameContext.timeMs,
+                projectionId: 'slow',
+                contentDigest: 'slow',
+              };
             }
             return { settled: true };
           },
@@ -736,7 +841,12 @@ test('deterministic worker failure aborts and closes the entire pool', async () 
     surface: { url: 'http://example.test/render' },
     video: { width: 320, height: 180, fps: 30, durationMs: 200, frameCount: 6 },
     timeline: [],
-    renderClock: { mode: 'deterministic', path: '__fixture.renderAt', workerCount: 2 },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 2,
+      setupState: TEST_SETUP_STATE,
+    },
   }, { artifactKind: 'frame-sequence', browserProfileRoot: tmp }), /render hook failed/);
   assert.deepEqual(closed.sort(), [0, 1]);
 });

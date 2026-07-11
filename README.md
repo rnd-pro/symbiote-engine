@@ -179,17 +179,27 @@ contract for seekable offline pages:
     workerCount: 4,
     settleFrames: 2,
     timeoutMs: 10000,
+    setupState: {
+      exportPath: '__renderSurface.exportState',
+      importPath: '__renderSurface.importState',
+    },
   },
 }
 ```
 
 Before each screenshot the provider calls the page method with exact timeline
 time and frame/worker metadata. The method must return
-`{ presentedTimeMs, projectionId }`, where `projectionId` is a non-empty,
-deterministic identity for that frame projection. Stateful provider `timeline`
+`{ presentedTimeMs, projectionId, contentDigest }`, where `projectionId` is a
+non-empty deterministic identity and `contentDigest` identifies the rendered
+page state. Stateful provider `timeline`
 actions are rejected in deterministic mode because the page owns arbitrary-time
 state projection. Multiple workers use isolated browser profiles and contiguous
-frame ranges; artifacts include capture duration, throughput, range, and
+frame ranges, but peers import an opaque canonical state exported by the leader.
+The provider compares the content digest and boundary pixels from the encoded
+worker ranges. The first three frames of every peer range are checked. Pixel
+proof requires an exact hash or SSIM of at least `0.999999`;
+a mismatch fails with `RENDER_SEAM_MISMATCH`. Artifacts
+include setup-state and seam evidence alongside duration, throughput, range, and
 warm-up metadata. Realtime capture remains single-worker.
 
 ## License

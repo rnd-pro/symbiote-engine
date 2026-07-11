@@ -1,5 +1,6 @@
 import { execFile as nodeExecFile } from 'node:child_process';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -110,6 +111,14 @@ function resolvePath(cwd, filePath, pathName) {
 
 function safeId(value) {
   return cleanString(value, 'screencast').replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 80) || 'screencast';
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+async function fileSha256(path) {
+  return sha256(await readFile(path));
 }
 
 function validateRegexPattern(pattern, path) {
@@ -443,12 +452,37 @@ function normalizeRenderClock(job, executionOptions, providerOptions, video) {
   if (timeline.length) {
     throw new Error('deterministic capture does not support stateful renderJob.timeline actions');
   }
+  let workerCount = Math.min(video.frameCount, requestedWorkers);
+  let setupStateSource = source.setupState && typeof source.setupState === 'object'
+    ? source.setupState
+    : null;
+  let setupState = setupStateSource ? {
+    exportPath: cleanPathParts(setupStateSource.exportPath, 'renderJob.renderClock.setupState.exportPath').join('.'),
+    importPath: cleanPathParts(setupStateSource.importPath, 'renderJob.renderClock.setupState.importPath').join('.'),
+  } : null;
+  if (workerCount > 1 && !setupState) {
+    let error = new Error('parallel deterministic capture requires renderJob.renderClock.setupState');
+    error.code = 'RENDER_SETUP_STATE_REQUIRED';
+    throw error;
+  }
+  let requestedSeamSsim = Number(source.seamSsim ?? 0.999999);
+  let seamSsim = Number.isFinite(requestedSeamSsim)
+    ? Math.min(1, Math.max(0.999999, requestedSeamSsim))
+    : 0.999999;
   return {
     mode,
     path,
-    workerCount: Math.min(video.frameCount, requestedWorkers),
+    workerCount,
     settleFrames: nonNegativeInteger(source.settleFrames, 2, 'renderJob.renderClock.settleFrames', 10),
     timeoutMs: Math.round(positiveNumber(source.timeoutMs, 10000, 'renderJob.renderClock.timeoutMs')),
+    setupState,
+    seamSsim,
+    seamProofFrames: nonNegativeInteger(
+      source.seamProofFrames,
+      3,
+      'renderJob.renderClock.seamProofFrames',
+      5,
+    ) || 1,
   };
 }
 
@@ -503,7 +537,11 @@ async function callRenderAt(page, renderClock, frameContext, signal) {
     }), signal), renderClock.timeoutMs,
     `render presentation barrier timed out at frame ${frameContext.frameIndex}`);
   }
-  return { presentedTimeMs, projectionId };
+  return {
+    presentedTimeMs,
+    projectionId,
+    contentDigest: cleanString(result?.contentDigest, ''),
+  };
 }
 
 function createFramesDir(root, id) {
@@ -617,6 +655,7 @@ async function prepareBrowserWorker({
   signal,
   log,
   executionOptions,
+  setupStateImport = null,
 }) {
   let workerStartedAt = Date.now();
   let detail = { workerIndex: range.workerIndex, startFrame: range.startFrame, endFrame: range.endFrame };
@@ -678,6 +717,17 @@ async function prepareBrowserWorker({
     }
     emitStage(executionOptions, 'setup:done', { ...detail, actions: setupActions.length });
 
+    if (setupStateImport) {
+      emitStage(executionOptions, 'setup-state:import', detail);
+      await withAbort(callWindowMethod(page, {
+        path: setupStateImport.path,
+        args: [setupStateImport.payload],
+        waitForPromise: true,
+        timeoutMs: renderClock.timeoutMs,
+      }, log), signal);
+      emitStage(executionOptions, 'setup-state:imported', detail);
+    }
+
     emitStage(executionOptions, 'fonts:wait', detail);
     await withAbort(waitForFontsReady(page, job.readiness?.fontsTimeoutMs || 10000), signal);
     emitStage(executionOptions, 'fonts:ready', detail);
@@ -698,6 +748,133 @@ async function prepareBrowserWorker({
     await closeBrowserWorker(browser, executionOptions, detail);
     throw error;
   }
+}
+
+async function captureSeamProofFrame({
+  prepared,
+  frame,
+  job,
+  video,
+  renderClock,
+  framesDir,
+  frameFormat,
+  frameExtension,
+  signal,
+}) {
+  let elapsedMs = frame * (1000 / video.fps);
+  let clockState = await callRenderAt(prepared.page, renderClock, {
+    timeMs: elapsedMs,
+    frameIndex: frame,
+    fps: video.fps,
+    durationMs: video.durationMs,
+    workerIndex: prepared.range.workerIndex,
+    range: {
+      startFrame: prepared.range.startFrame,
+      endFrame: prepared.range.endFrame,
+    },
+    proofOnly: true,
+  }, signal);
+  await withAbort(setCaption(prepared.page, captionAt(job.captions, elapsedMs)), signal);
+  let path = join(
+    framesDir,
+    `.seam-worker-${prepared.range.workerIndex}-frame-${String(frame).padStart(5, '0')}.${frameExtension}`,
+  );
+  await withAbort(prepared.page.screenshot({ path, type: frameFormat, fullPage: false }), signal);
+  return {
+    workerIndex: prepared.range.workerIndex,
+    frame,
+    elapsedMs: Math.round(elapsedMs),
+    path,
+    pixelHash: await fileSha256(path),
+    contentDigest: clockState.contentDigest,
+  };
+}
+
+async function verifyWorkerSeams({
+  prepared,
+  workerResults,
+  job,
+  video,
+  renderClock,
+  framesDir,
+  frameFormat,
+  frameExtension,
+  execFile,
+  ffmpegPath,
+  signal,
+  executionOptions,
+}) {
+  let proofs = [];
+  for (let index = 1; index < prepared.length; index += 1) {
+    let startFrame = prepared[index].range.startFrame;
+    let endFrame = Math.min(
+      prepared[index].range.endFrame,
+      startFrame + renderClock.seamProofFrames - 1,
+    );
+    for (let frame = startFrame; frame <= endFrame; frame += 1) {
+      let before = await captureSeamProofFrame({
+        prepared: prepared[index - 1],
+        frame,
+        job,
+        video,
+        renderClock,
+        framesDir,
+        frameFormat,
+        frameExtension,
+        signal,
+      });
+      let actual = workerResults[index].frameFiles.find((frameFile) => frameFile.index === frame);
+      if (!actual) throw new Error(`render worker ${index} returned no boundary frame ${frame}`);
+      let after = {
+        workerIndex: prepared[index].range.workerIndex,
+        frame,
+        elapsedMs: actual.elapsedMs,
+        path: actual.path,
+        pixelHash: await fileSha256(actual.path),
+        contentDigest: actual.contentDigest,
+      };
+      let contentMatches = Boolean(before.contentDigest)
+        && before.contentDigest === after.contentDigest;
+      let exactPixelsMatch = before.pixelHash === after.pixelHash;
+      let ssim = exactPixelsMatch ? 1 : 0;
+      if (!exactPixelsMatch) {
+        let comparison = await execFile(ffmpegPath, [
+          '-i', before.path,
+          '-i', after.path,
+          '-lavfi', 'ssim',
+          '-f', 'null',
+          '-',
+        ]);
+        let match = String(comparison?.stderr || '').match(/All:([0-9.]+)/);
+        ssim = Number(match?.[1] || 0);
+      }
+      let pixelsMatch = exactPixelsMatch || ssim >= renderClock.seamSsim;
+      let proof = {
+        frame,
+        elapsedMs: before.elapsedMs,
+        workers: [before.workerIndex, after.workerIndex],
+        contentDigest: before.contentDigest,
+        peerContentDigest: after.contentDigest,
+        contentMatches,
+        pixelHash: before.pixelHash,
+        peerPixelHash: after.pixelHash,
+        exactPixelsMatch,
+        ssim,
+        requiredSsim: renderClock.seamSsim,
+        pixelsMatch,
+      };
+      proofs.push(proof);
+      if (!contentMatches || !pixelsMatch) {
+        let error = new Error(`render worker seam mismatch at frame ${frame}`);
+        error.code = 'RENDER_SEAM_MISMATCH';
+        error.proof = { ...proof, paths: [before.path, after.path] };
+        throw error;
+      }
+      await rm(before.path, { force: true });
+      emitStage(executionOptions, 'capture:seam-verified', proof);
+    }
+  }
+  return proofs;
 }
 
 async function captureBrowserWorker({
@@ -761,6 +938,7 @@ async function captureBrowserWorker({
       path: framePath,
       elapsedMs: Math.round(elapsedMs),
       mimeType: frameMimeType,
+      contentDigest: clockState.contentDigest,
     };
     frameFiles.push(frameFile);
     onFrame(frameFile, detail);
@@ -808,7 +986,45 @@ async function executeDeterministicCapture({
   let activeWorkers = [];
   let poolStartedAt = Date.now();
   try {
-    let prepared = await settleWorkerPool(ranges.map((range, index) => async () => {
+    let leader = await prepareBrowserWorker({
+      puppeteer,
+      job,
+      video,
+      range: ranges[0],
+      profileDir: browserProfileDirs[0],
+      renderClock,
+      signal: pool.controller.signal,
+      log,
+      executionOptions,
+    });
+    activeWorkers.push(leader);
+    let setupStatePayload = null;
+    let setupStateHash = '';
+    if (ranges.length > 1) {
+      emitStage(executionOptions, 'setup-state:export', { workerIndex: 0 });
+      setupStatePayload = await withAbort(callWindowMethod(leader.page, {
+        path: renderClock.setupState.exportPath,
+        waitForPromise: true,
+        timeoutMs: renderClock.timeoutMs,
+      }, log), pool.controller.signal);
+      if (!setupStatePayload || typeof setupStatePayload !== 'object') {
+        let error = new Error('render setup state export returned no object payload');
+        error.code = 'RENDER_SETUP_STATE_INVALID';
+        throw error;
+      }
+      setupStateHash = sha256(JSON.stringify(setupStatePayload));
+      emitStage(executionOptions, 'setup-state:exported', { workerIndex: 0, setupStateHash });
+      emitStage(executionOptions, 'setup-state:canonicalize', { workerIndex: 0 });
+      await withAbort(callWindowMethod(leader.page, {
+        path: renderClock.setupState.importPath,
+        args: [setupStatePayload],
+        waitForPromise: true,
+        timeoutMs: renderClock.timeoutMs,
+      }, log), pool.controller.signal);
+      emitStage(executionOptions, 'setup-state:canonicalized', { workerIndex: 0, setupStateHash });
+    }
+    let peers = await settleWorkerPool(ranges.slice(1).map((range, offset) => async () => {
+      let index = offset + 1;
       let worker = await prepareBrowserWorker({
         puppeteer,
         job,
@@ -819,10 +1035,15 @@ async function executeDeterministicCapture({
         signal: pool.controller.signal,
         log,
         executionOptions,
+        setupStateImport: {
+          path: renderClock.setupState.importPath,
+          payload: setupStatePayload,
+        },
       });
       activeWorkers.push(worker);
       return worker;
     }), pool.controller);
+    let prepared = [leader, ...peers];
     let completion = createRenderFrameCompletionTracker(video.frameCount);
     emitStage(executionOptions, 'capture:start', {
       frames: video.frameCount,
@@ -863,6 +1084,20 @@ async function executeDeterministicCapture({
         },
       })
     )), pool.controller);
+    let seamProofs = await verifyWorkerSeams({
+      prepared,
+      workerResults,
+      job,
+      video,
+      renderClock,
+      framesDir,
+      frameFormat,
+      frameExtension,
+      execFile,
+      ffmpegPath,
+      signal: pool.controller.signal,
+      executionOptions,
+    });
     let frameFiles = workerResults
       .flatMap((result) => result.frameFiles)
       .sort((a, b) => a.index - b.index);
@@ -878,6 +1113,8 @@ async function executeDeterministicCapture({
         ? Math.round((video.frameCount / (durationMs / 1000)) * 1000) / 1000
         : 0,
       frameTimeSource: 'page-render-clock',
+      ...(setupStateHash ? { setupStateHash } : {}),
+      seamProofs,
       workerRanges: workerResults
         .map((result) => result.metric)
         .sort((a, b) => a.workerIndex - b.workerIndex),

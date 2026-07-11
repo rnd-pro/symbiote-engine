@@ -7,6 +7,9 @@
   cannot block completed render frames.
 - Added deterministic browser render-clock capture, bounded parallel worker
   coordination, ordered frame progress, and capture performance metadata.
+- Made parallel deterministic capture fail closed by handing an opaque canonical
+  setup state from the leader to peer browsers and verifying content plus
+  near-lossless boundary pixels before encoding independently rendered ranges.
 - Added audio provider contract helpers, an engine-owned provider job queue,
   a content-addressed artifact store, and an injectable local TTS HTTP provider
   for local audio generation pipelines.
