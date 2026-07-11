@@ -23,6 +23,9 @@ export {
 } from './render-provider.js';
 
 export {
+  AUDIO_SYNTHESIS_RECEIPT_HEADER,
+  AUDIO_SYNTHESIS_RECEIPT_VERSION,
+  canonicalAudioSynthesisJson,
   createAudioProviderNotReadyError,
   createAudioCacheKey,
   createAudioProviderRegistry,
@@ -31,5 +34,6 @@ export {
   normalizeAudioJob,
   normalizeAudioProvider,
   normalizeAudioProviderReadiness,
+  normalizeAudioSynthesisReceipt,
   normalizeVoiceReference,
 } from './audio-provider.js';

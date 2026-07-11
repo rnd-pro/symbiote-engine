@@ -8,6 +8,10 @@ const PROVIDER_JOB_KIND = Object.freeze({
   'local-transcribe': 'transcribe',
 });
 const SHA256_ARTIFACT_RE = /^sha256:[a-f0-9]{64}$/;
+const SHA256_DIGEST_RE = /^[a-f0-9]{64}$/;
+
+export const AUDIO_SYNTHESIS_RECEIPT_VERSION = 'symbiote-audio-synthesis-receipt-v1';
+export const AUDIO_SYNTHESIS_RECEIPT_HEADER = 'X-Audio-Receipt';
 
 function fail(path, message) {
   throw new Error(`${path}: ${message}`);
@@ -78,6 +82,32 @@ function positiveInteger(value, fallback, path) {
   return Math.round(positiveNumber(value, fallback, path));
 }
 
+function strictPositiveInteger(value, path) {
+  let number = Number(value);
+  if (!Number.isInteger(number) || number <= 0) fail(path, 'must be a positive integer');
+  return number;
+}
+
+function requireExactKeys(value, keys, path) {
+  let actual = Object.keys(value).sort();
+  let expected = [...keys].sort();
+  if (actual.length !== expected.length || actual.some((key, index) => key !== expected[index])) {
+    fail(path, `must contain exactly: ${expected.join(', ')}`);
+  }
+}
+
+function requireDigest(value, path) {
+  let digest = cleanString(value, '');
+  if (!SHA256_DIGEST_RE.test(digest)) fail(path, 'must be a lowercase 64-character hex digest');
+  return digest;
+}
+
+function requireString(value, path) {
+  let text = cleanString(value, '');
+  if (!text) fail(path, 'is required');
+  return text;
+}
+
 function assertPortableId(value, path) {
   let id = cleanString(value, '');
   if (!id) fail(path, 'is required');
@@ -102,6 +132,50 @@ export function normalizeVoiceReference(reference = {}) {
   return {
     ...cloneJson(reference),
     id: assertPortableId(reference.id, 'voiceReference.id'),
+  };
+}
+
+export function canonicalAudioSynthesisJson(value) {
+  return stableJson(value);
+}
+
+export function normalizeAudioSynthesisReceipt(receipt = {}) {
+  requireObject(receipt, 'synthesisReceipt');
+  requireExactKeys(receipt, [
+    'receiptVersion',
+    'requestHash',
+    'requestedVoiceRef',
+    'resolvedVoiceRef',
+    'speakerAttestation',
+    'model',
+    'language',
+    'sampleRate',
+    'durationMs',
+    'artifactHash',
+    'receiptHmac',
+  ], 'synthesisReceipt');
+  if (receipt.receiptVersion !== AUDIO_SYNTHESIS_RECEIPT_VERSION) {
+    fail('synthesisReceipt.receiptVersion', `must be "${AUDIO_SYNTHESIS_RECEIPT_VERSION}"`);
+  }
+  let model = requireObject(receipt.model, 'synthesisReceipt.model');
+  requireExactKeys(model, ['family', 'versionToken'], 'synthesisReceipt.model');
+  let speakerAttestation = cleanString(receipt.speakerAttestation, '');
+  if (!speakerAttestation) fail('synthesisReceipt.speakerAttestation', 'is required');
+  return {
+    receiptVersion: AUDIO_SYNTHESIS_RECEIPT_VERSION,
+    requestHash: requireDigest(receipt.requestHash, 'synthesisReceipt.requestHash'),
+    requestedVoiceRef: assertPortableId(receipt.requestedVoiceRef, 'synthesisReceipt.requestedVoiceRef'),
+    resolvedVoiceRef: assertPortableId(receipt.resolvedVoiceRef, 'synthesisReceipt.resolvedVoiceRef'),
+    speakerAttestation,
+    model: {
+      family: requireString(model.family, 'synthesisReceipt.model.family'),
+      versionToken: requireString(model.versionToken, 'synthesisReceipt.model.versionToken'),
+    },
+    language: requireString(receipt.language, 'synthesisReceipt.language'),
+    sampleRate: strictPositiveInteger(receipt.sampleRate, 'synthesisReceipt.sampleRate'),
+    durationMs: strictPositiveInteger(receipt.durationMs, 'synthesisReceipt.durationMs'),
+    artifactHash: requireDigest(receipt.artifactHash, 'synthesisReceipt.artifactHash'),
+    receiptHmac: requireDigest(receipt.receiptHmac, 'synthesisReceipt.receiptHmac'),
   };
 }
 
@@ -201,6 +275,9 @@ export function normalizeAudioArtifact(result = {}) {
   }
   if (result.text !== undefined) output.text = cleanString(result.text, '');
   if (Array.isArray(result.words)) output.words = cloneJson(result.words);
+  if (result.synthesisReceipt !== undefined) {
+    output.synthesisReceipt = normalizeAudioSynthesisReceipt(result.synthesisReceipt);
+  }
   return output;
 }
 

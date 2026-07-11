@@ -50,7 +50,10 @@ export * as AgentUI from './AgentUICommands.js';
 export { FocusController } from './FocusController.js';
 
 export {
+  AUDIO_SYNTHESIS_RECEIPT_HEADER,
+  AUDIO_SYNTHESIS_RECEIPT_VERSION,
   buildResourceTreeFromEntries,
+  canonicalAudioSynthesisJson,
   createAudioProviderNotReadyError,
   createMemoryPersistenceAdapter,
   createAudioCacheKey,
@@ -63,6 +66,7 @@ export {
   normalizeAudioJob,
   normalizeAudioProvider,
   normalizeAudioProviderReadiness,
+  normalizeAudioSynthesisReceipt,
   normalizeResourceTree,
   normalizeResourceTreeItem,
   normalizeAudioProviderDescriptor,
@@ -141,5 +145,12 @@ export {
   streamDurationSec,
 } from './render-proof.js';
 export { createStageProgressTracker } from './render-progress.js';
-export { createLocalAudioTtsProvider } from './providers/local-audio-tts.js';
+export {
+  createAudioArtifactHash,
+  createAudioSynthesisReceiptHmac,
+  createAudioSynthesisRequestHash,
+  createLocalAudioTtsProvider,
+  parseAudioSynthesisReceipt,
+  verifyAudioSynthesisReceipt,
+} from './providers/local-audio-tts.js';
 export { createLocalAudioTranscribeProvider } from './providers/local-audio-transcribe.js';

@@ -46,7 +46,7 @@ metadata, and browser UI.
 - **Portable host contracts** — normalized source documents, resource trees, and
   persistence adapters for agent and editor surfaces.
 - **Local media provider primitives** — audio provider contracts, provider-job
-  queues, content-addressed artifacts, and injectable local TTS providers.
+  queues, content-addressed artifacts, and receipt-verified local TTS providers.
 - **Multiple runtime surfaces** — Node-safe root exports, browser-safe exports,
   CLI workflow commands, and an optional HTTP/WebSocket graph server.
 
@@ -145,6 +145,10 @@ symbiote-engine inspect workflow.json --json
 - `symbiote-engine/contracts` — normalized resource, document, persistence,
   render-provider, and audio-provider contract helpers.
 - `symbiote-engine/artifacts` — Node-only content-addressed artifact store.
+- `symbiote-engine/providers/local-audio-tts.js` — Node-only local TTS transport
+  with mandatory `X-Audio-Receipt` verification. Configure `receiptSecret` with
+  at least 32 bytes; missing, malformed, or inconsistent receipts fail before
+  artifact writes.
 - `symbiote-engine/provider-jobs` — engine-owned provider job queue primitives
   with model-service readiness gating.
 - `symbiote-engine/render-cache` — Node-only frame cache keys, in-memory frame

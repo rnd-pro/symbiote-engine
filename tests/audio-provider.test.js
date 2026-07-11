@@ -6,6 +6,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 
 import {
+  AUDIO_SYNTHESIS_RECEIPT_VERSION,
+  canonicalAudioSynthesisJson,
   createAudioCacheKey,
   createAudioProviderRegistry,
   normalizeAudioArtifact,
@@ -15,10 +17,38 @@ import {
 } from '../contracts/audio-provider.js';
 import { createFileArtifactStore } from '../artifacts.js';
 import { createAudioProviderJobQueue } from '../provider-jobs.js';
-import { createLocalAudioTtsProvider } from '../providers/local-audio-tts.js';
+import {
+  createAudioArtifactHash,
+  createAudioSynthesisReceiptHmac,
+  createAudioSynthesisRequestHash,
+  createLocalAudioTtsProvider,
+} from '../providers/local-audio-tts.js';
 
 const ARTIFACT_A = `sha256:${'a'.repeat(64)}`;
 const ARTIFACT_B = `sha256:${'b'.repeat(64)}`;
+const RECEIPT_SECRET = 'test-receipt-secret-is-at-least-32-bytes';
+
+function testReceipt(item, bytes = Buffer.from('RIFFfakewav'), overrides = {}) {
+  let receipt = {
+    receiptVersion: AUDIO_SYNTHESIS_RECEIPT_VERSION,
+    requestHash: createAudioSynthesisRequestHash(item),
+    requestedVoiceRef: item.voiceRef,
+    resolvedVoiceRef: 'qwen3:speaker:vivian',
+    speakerAttestation: 'opaque-speaker-hmac-digest',
+    model: { family: 'qwen3', versionToken: 'test' },
+    language: item.language,
+    sampleRate: 24000,
+    durationMs: 1200,
+    artifactHash: createAudioArtifactHash(bytes),
+    ...overrides,
+  };
+  receipt.receiptHmac = createAudioSynthesisReceiptHmac(receipt, RECEIPT_SECRET);
+  return receipt;
+}
+
+function encodeReceipt(receipt) {
+  return Buffer.from(canonicalAudioSynthesisJson(receipt)).toString('base64url');
+}
 
 test('audio provider contract validates providers, jobs, voice refs, and artifacts', async () => {
   let provider = normalizeAudioProvider({
@@ -253,6 +283,26 @@ test('file artifact store writes content-addressed audio metadata and stable ref
   }
 });
 
+test('file artifact store rejects a different synthesis receipt for the same content', async () => {
+  let root = await mkdtemp(join(os.tmpdir(), 'sym-engine-audio-receipt-conflict-'));
+  try {
+    let store = createFileArtifactStore({ root });
+    let item = {
+      id: 'job', text: 'Hola', language: 'es', voiceRef: 'voice:a', style: '', format: 'wav', normalize: true,
+    };
+    let receipt = testReceipt(item);
+    await store.put(Buffer.from('RIFFfakewav'), { mimeType: 'audio/wav', synthesisReceipt: receipt });
+    let conflictingReceipt = testReceipt(item, Buffer.from('RIFFfakewav'), { resolvedVoiceRef: 'qwen3:speaker:ryan' });
+    await assert.rejects(
+      () => store.put(Buffer.from('RIFFfakewav'), { mimeType: 'audio/wav', synthesisReceipt: conflictingReceipt }),
+      (error) => error.code === 'AUDIO_ARTIFACT_RECEIPT_CONFLICT',
+    );
+    assert.deepEqual((await store.get(`sha256:${createAudioArtifactHash(Buffer.from('RIFFfakewav'))}`)).metadata.synthesisReceipt, receipt);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('provider job queue serializes per model class, idempotently caches, and cancels queued jobs', async () => {
   let active = 0;
   let maxActive = 0;
@@ -354,6 +404,38 @@ test('provider job queue serializes per model class, idempotently caches, and ca
   assert.equal(queue.get(settingsVariant.jobId).status, 'succeeded');
   assert.equal(settingsVariant.cacheHit, false);
   assert.equal(calls.length, 3);
+});
+
+test('provider job queue preserves synthesis receipts in results and cache hits', async () => {
+  let item = {
+    id: 'job', text: 'Hola', language: 'es', voiceRef: 'voice:a', style: '', format: 'wav', normalize: true,
+  };
+  let receipt = testReceipt(item);
+  let calls = 0;
+  let registry = createAudioProviderRegistry([{
+    id: 'receipt-tts',
+    kind: 'local-tts',
+    execute: async () => {
+      calls += 1;
+      return {
+        artifactId: ARTIFACT_A,
+        mimeType: 'audio/wav',
+        durationSec: 1.2,
+        sampleRate: 24000,
+        synthesisReceipt: receipt,
+      };
+    },
+  }]);
+  let queue = createAudioProviderJobQueue({ registry });
+  let job = { kind: 'tts', providerId: 'receipt-tts', input: item };
+  let first = await queue.submit(job);
+  await queue.drain();
+  assert.deepEqual(queue.get(first.jobId).result.synthesisReceipt, receipt);
+
+  let cached = await queue.submit(job);
+  assert.equal(cached.cacheHit, true);
+  assert.deepEqual(cached.result.synthesisReceipt, receipt);
+  assert.equal(calls, 1);
 });
 
 test('provider job queue times out running audio providers without caching artifacts', async () => {
@@ -484,6 +566,7 @@ test('local audio TTS provider uses injected HTTP transport and stores engine ar
       profile: 'qwen3',
       endpoint: 'http://local-audio.test',
       artifactStore: store,
+      receiptSecret: RECEIPT_SECRET,
       fetch: async (url, options) => {
         seen = { url, options };
         let bytes = Buffer.from('RIFFfakewav');
@@ -496,6 +579,15 @@ test('local audio TTS provider uses injected HTTP transport and stores engine ar
                 'content-type': 'audio/wav',
                 'x-audio-duration-sec': '1.2',
                 'x-audio-sample-rate': '24000',
+                'x-audio-receipt': encodeReceipt(testReceipt({
+                  id: 'job',
+                  text: 'Hola',
+                  language: 'es',
+                  voiceRef: 'voice:mateo-es-v1',
+                  style: 'warm',
+                  format: 'wav',
+                  normalize: true,
+                }, bytes)),
               }[String(name).toLowerCase()] || null;
             },
           },
