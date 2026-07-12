@@ -148,6 +148,9 @@ export function buildRenderQueueSnapshot(record = {}, submitted = {}, options = 
     ? {
       message: sanitizeMessage(record.error?.message, String(record.error || failureFallback)),
       code: cleanString(record.error?.code, ''),
+      ...(record.error?.proof && typeof record.error.proof === 'object'
+        ? { proof: structuredClone(record.error.proof) }
+        : {}),
     }
     : null;
   let snapshot = {

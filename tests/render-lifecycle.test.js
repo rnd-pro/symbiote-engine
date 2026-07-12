@@ -188,7 +188,7 @@ test('render lifecycle builds neutral queue snapshots with default sanitization'
     cacheHit: 'yes',
     cancelReason: 'operator canceled',
     cleanup: { removed: [{ path: 'frames' }] },
-    error: { message: 'provider failed', code: 'E_PROVIDER' },
+    error: { message: 'provider failed', code: 'E_PROVIDER', proof: { frame: 12, contentMatches: false } },
   }, { jobId: 'submitted-1' }), {
     jobId: 'render-1',
     status: 'failed',
@@ -198,7 +198,7 @@ test('render lifecycle builds neutral queue snapshots with default sanitization'
     timeoutReason: '',
     cancelReason: 'operator canceled',
     cleanup: { removed: [{ path: 'frames' }] },
-    error: { message: 'provider failed', code: 'E_PROVIDER' },
+    error: { message: 'provider failed', code: 'E_PROVIDER', proof: { frame: 12, contentMatches: false } },
   });
   assert.deepEqual(buildRenderQueueSnapshot({}, { jobId: 'submitted-1', status: 'queued' }), {
     jobId: 'submitted-1',
