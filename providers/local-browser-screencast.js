@@ -467,7 +467,7 @@ function normalizeRenderClock(job, executionOptions, providerOptions, video) {
   }
   let requestedSeamSsim = Number(source.seamSsim ?? 0.999999);
   let seamSsim = Number.isFinite(requestedSeamSsim)
-    ? Math.min(1, Math.max(0.999999, requestedSeamSsim))
+    ? Math.min(1, Math.max(0.99, requestedSeamSsim))
     : 0.999999;
   return {
     mode,
