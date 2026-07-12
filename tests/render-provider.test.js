@@ -697,10 +697,10 @@ test('parallel deterministic capture fails closed when worker seam content diffe
       workerCount: 2,
       setupState: TEST_SETUP_STATE,
     },
+    execution: { seamFailureDir },
   }, {
     artifactKind: 'frame-sequence',
     browserProfileRoot: tmp,
-    seamFailureDir,
   }), (error) => (
     error?.code === 'RENDER_SEAM_MISMATCH'
       && error?.proof?.contentMatches === false

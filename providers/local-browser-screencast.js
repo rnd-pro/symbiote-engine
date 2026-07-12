@@ -879,11 +879,12 @@ async function verifyWorkerSeams({
       proofs.push(proof);
       if (!contentMatches || !pixelsMatch) {
         let diagnosticFiles = [];
-        if (executionOptions.seamFailureDir) {
-          await mkdir(executionOptions.seamFailureDir, { recursive: true });
+        let seamFailureDir = executionOptions.seamFailureDir || job.execution?.seamFailureDir;
+        if (seamFailureDir) {
+          await mkdir(seamFailureDir, { recursive: true });
           for (let [proofIndex, source] of [before.path, after.path].entries()) {
             let name = `frame-${String(frame).padStart(5, '0')}-worker-${proof.workers[proofIndex]}.${frameExtension}`;
-            await copyFile(source, join(executionOptions.seamFailureDir, name));
+            await copyFile(source, join(seamFailureDir, name));
             diagnosticFiles.push(name);
           }
         }
