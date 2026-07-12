@@ -1,10 +1,17 @@
 import { captionTranscriptDurationSec } from './render-captions.js';
 import { cleanString, finiteNonNegativeNumber, finitePositiveNumber } from './render-utils.js';
 import { createRenderFrameCompletionTracker } from './render-workers.js';
+import {
+  normalizeNativeSegment,
+  normalizeSeamBoundary,
+  normalizeSeamPolicy,
+} from './contracts/render-segment.js';
 
 export const RENDER_FRAME_COMPLETENESS_PROOF_VERSION = 'render-frame-completeness-v1';
 export const RENDER_PERFORMANCE_PROOF_VERSION = 'render-performance-v1';
 export const RENDER_WORKER_CAPACITY_PROOF_VERSION = 'render-worker-capacity-v1';
+export const RENDER_SEGMENT_SEAM_PROOF_VERSION = 'render-segment-seam-v1';
+export const RENDER_STREAM_PTS_PROOF_VERSION = 'render-stream-pts-v1';
 
 function positiveInteger(value, path) {
   let number = Number(value);
@@ -383,6 +390,206 @@ export function buildRenderAudioLayerProof(options = {}) {
     mixDurationMs: resolvedMixDurationMs,
     durationDriftMs: Math.round(audioLayerDurationDriftMs),
     speakerLayers: [...layerMap.values()],
+  };
+}
+
+function sameTimeBase(prev, next) {
+  return prev.timeBase.num === next.timeBase.num && prev.timeBase.den === next.timeBase.den;
+}
+
+export function buildRenderSegmentSeamProof({ segments = [], policy } = {}) {
+  let normalizedPolicy = normalizeSeamPolicy(policy, 'seamPolicy');
+  let list = Array.isArray(segments) ? segments : [];
+  let normalized = list.map((segment, index) =>
+    normalizeNativeSegment(segment, { path: `segments[${index}]` }));
+  let seams = [];
+  let errors = [];
+
+  for (let index = 0; index < normalized.length - 1; index += 1) {
+    let prev = normalized[index];
+    let next = normalized[index + 1];
+    let rawNext = list[index + 1] || {};
+    let boundary = normalizeSeamBoundary(rawNext.boundary ?? {}, `segments[${index + 1}].boundary`);
+    let from = prev.id;
+    let to = next.id;
+    let seamErrors = [];
+
+    if (!sameTimeBase(prev, next)) {
+      seamErrors.push('timebase-mismatch');
+    } else if (next.firstPts === prev.lastPts) {
+      seamErrors.push('duplicate-boundary-pts');
+    } else {
+      let expectedPts = prev.lastPts + prev.frameDurationTicks;
+      if (next.firstPts < expectedPts) seamErrors.push('pts-overlap');
+      else if (next.firstPts > expectedPts) seamErrors.push('pts-gap');
+    }
+
+    let expectedStart = prev.frameRange.end + 1;
+    if (next.frameRange.start < expectedStart) seamErrors.push('frame-overlap');
+    else if (next.frameRange.start > expectedStart) seamErrors.push('frame-gap');
+
+    if (boundary.overlapOwner !== normalizedPolicy.owner) {
+      seamErrors.push('overlap-ownership-mismatch');
+    }
+
+    if (normalizedPolicy.type === 'exact') {
+      let identityMatch = Boolean(boundary.boundaryIdentity)
+        && boundary.boundaryIdentity === boundary.prevBoundaryIdentity;
+      if (boundary.exactPixelsMatch !== true && !identityMatch) {
+        seamErrors.push('exact-seam-unproven');
+      }
+    } else {
+      let ssim = boundary.ssim;
+      if (!(Number.isFinite(ssim) && ssim >= normalizedPolicy.requiredSsim)) {
+        seamErrors.push('perceptual-ssim-below-threshold');
+      }
+    }
+
+    seams.push({ index, from, to, ok: seamErrors.length === 0, errors: seamErrors });
+    for (let seamError of seamErrors) errors.push(`seam ${from}->${to}: ${seamError}`);
+  }
+
+  let ownership = evaluateLogicalFrameOwnership(normalized);
+  if (ownership) {
+    if (ownership.unownedFrames.length) errors.push('logical-frame-unowned');
+    if (ownership.doubleOwnedFrames.length) errors.push('logical-frame-double-owned');
+  }
+
+  return {
+    version: RENDER_SEGMENT_SEAM_PROOF_VERSION,
+    ok: errors.length === 0,
+    errors,
+    policy: normalizedPolicy,
+    seams,
+    logicalRange: ownership ? ownership.logicalRange : null,
+    unownedFrames: ownership ? ownership.unownedFrames : [],
+    doubleOwnedFrames: ownership ? ownership.doubleOwnedFrames : [],
+  };
+}
+
+function evaluateLogicalFrameOwnership(normalized) {
+  if (!normalized.length) return null;
+  let start = normalized[0].frameRange.start;
+  let end = normalized[normalized.length - 1].frameRange.end;
+  let unownedFrames = [];
+  let doubleOwnedFrames = [];
+  for (let frame = start; frame <= end; frame += 1) {
+    let owners = 0;
+    for (let segment of normalized) {
+      if (segment.frameRange.start <= frame && frame <= segment.frameRange.end) owners += 1;
+    }
+    if (owners === 0) unownedFrames.push(frame);
+    else if (owners > 1) doubleOwnedFrames.push(frame);
+  }
+  return { logicalRange: { start, end }, unownedFrames, doubleOwnedFrames };
+}
+
+export function buildRenderStreamPtsProof({ frames = [], ptsStep } = {}) {
+  let errors = [];
+  let step = Number(ptsStep);
+  let validStep = Number.isInteger(step) && step > 0;
+  if (!validStep) errors.push('missing-cadence-evidence');
+
+  let list = Array.isArray(frames) ? frames : [];
+  if (!list.length) errors.push('empty-frame-stream');
+  let ptsSeen = new Set();
+  let identitySeen = new Set();
+  let indexSeen = new Set();
+  let missingIdentities = [];
+  let duplicateIdentities = [];
+  let invalidIndexes = [];
+  let indexGaps = [];
+  let invalidPts = [];
+  let duplicatePts = [];
+  let ptsGaps = [];
+  let ptsOverlaps = [];
+  let staticRuns = [];
+  let previousPts = null;
+  let previousIndex = null;
+  let previousFrame = null;
+  let currentRun = null;
+
+  for (let [position, frame] of list.entries()) {
+    let identity = cleanString(frame?.identity ?? frame?.contentDigest, '');
+    if (!identity) missingIdentities.push({ position });
+    else if (identitySeen.has(identity)) duplicateIdentities.push({ position, identity });
+    else identitySeen.add(identity);
+
+    let rawIndex = frame?.index;
+    let index = Number(rawIndex);
+    let validIndex = Number.isInteger(index) && index >= 0;
+    if (!validIndex) {
+      invalidIndexes.push({ position, index: Number.isFinite(index) ? index : null });
+    } else {
+      if (indexSeen.has(index)) indexGaps.push({ position, previous: previousIndex, index, expected: previousIndex === null ? null : previousIndex + 1 });
+      else indexSeen.add(index);
+      if (previousIndex !== null && index !== previousIndex + 1) {
+        indexGaps.push({ position, previous: previousIndex, index, expected: previousIndex + 1 });
+      }
+      previousIndex = index;
+    }
+
+    let rawPts = frame?.pts;
+    let pts = Number(rawPts);
+    let validPts = Number.isInteger(pts);
+    let pixelHash = cleanString(frame?.pixelHash, '');
+    if (!validPts) {
+      invalidPts.push({ position, pts: Number.isFinite(pts) ? pts : null });
+    } else {
+      if (ptsSeen.has(pts)) duplicatePts.push({ position, pts });
+      else ptsSeen.add(pts);
+      if (previousPts !== null && validStep) {
+        let expectedPts = previousPts + step;
+        if (pts < expectedPts) ptsOverlaps.push({ position, previous: previousPts, pts, expected: expectedPts });
+        else if (pts > expectedPts) ptsGaps.push({ position, previous: previousPts, pts, expected: expectedPts });
+      }
+      previousPts = pts;
+    }
+
+    let sharesStatic = previousFrame
+      && pixelHash
+      && pixelHash === previousFrame.pixelHash;
+    if (sharesStatic) {
+      if (currentRun && currentRun.pixelHash === pixelHash) {
+        currentRun.positions.push(position);
+      } else {
+        if (currentRun) staticRuns.push(currentRun);
+        currentRun = { pixelHash, positions: [previousFrame.position, position] };
+      }
+    } else if (currentRun) {
+      staticRuns.push(currentRun);
+      currentRun = null;
+    }
+
+    previousFrame = { position, pixelHash };
+  }
+  if (currentRun) staticRuns.push(currentRun);
+
+  if (missingIdentities.length) errors.push(`${missingIdentities.length} frames are missing an identity`);
+  if (duplicateIdentities.length) errors.push(`${duplicateIdentities.length} frames share a duplicate identity`);
+  if (invalidIndexes.length) errors.push(`${invalidIndexes.length} frames have an invalid index`);
+  if (indexGaps.length) errors.push(`${indexGaps.length} frame indices break the contiguous cadence`);
+  if (invalidPts.length) errors.push(`${invalidPts.length} frames have a non-integer PTS`);
+  if (duplicatePts.length) errors.push(`${duplicatePts.length} frames share a duplicate PTS`);
+  if (ptsGaps.length) errors.push(`${ptsGaps.length} PTS transitions exceed the exact cadence`);
+  if (ptsOverlaps.length) errors.push(`${ptsOverlaps.length} PTS transitions fall short of the exact cadence`);
+
+  return {
+    version: RENDER_STREAM_PTS_PROOF_VERSION,
+    ok: errors.length === 0,
+    errors,
+    ptsStep: validStep ? step : null,
+    frameCount: list.length,
+    uniquePtsCount: ptsSeen.size,
+    missingIdentities,
+    duplicateIdentities,
+    invalidIndexes,
+    indexGaps,
+    invalidPts,
+    duplicatePts,
+    ptsGaps,
+    ptsOverlaps,
+    staticRuns: staticRuns.map((run) => ({ pixelHash: run.pixelHash, positions: run.positions, length: run.positions.length })),
   };
 }
 

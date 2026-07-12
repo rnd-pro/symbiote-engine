@@ -1,5 +1,15 @@
-const RENDER_PROVIDER_KINDS = new Set(['screencast']);
-const RENDER_ARTIFACT_KINDS = new Set(['screencast', 'frame-sequence']);
+import {
+  accelerationCandidateProven,
+  normalizeAccelerationSelection,
+  normalizeExecutionTier,
+} from './render-capability.js';
+import { normalizeNativeSegment, normalizeNativeSegmentJob } from './render-segment.js';
+
+const ARTIFACT_HASH_RE = /^(sha256:)?[A-Fa-f0-9]{8,}$/;
+const CLOCK_MODES = new Set(['wall-clock', 'render-time']);
+
+const RENDER_PROVIDER_KINDS = new Set(['screencast', 'native-segment']);
+const RENDER_ARTIFACT_KINDS = new Set(['screencast', 'frame-sequence', 'native-segment']);
 const AUDIO_PROVIDER_KINDS = new Set(['browser-tts', 'local-tts', 'local-transcribe']);
 const RENDER_CAPTURE_TRANSPORTS = new Set(['screenshot', 'attributed-compositor']);
 
@@ -19,6 +29,18 @@ function requireObject(value, path) {
     fail(path, 'must be an object');
   }
   return value;
+}
+
+function portableRef(value, path) {
+  if (typeof value === 'function') {
+    fail(path, 'must be a portable string token, not a function');
+  }
+  if (value !== null && typeof value === 'object') {
+    fail(path, 'must be a portable string token, not an object');
+  }
+  let text = cleanString(value, '');
+  if (!text) fail(path, 'is required');
+  return text;
 }
 
 function positiveNumber(value, fallback, path) {
@@ -308,6 +330,7 @@ export function normalizeRenderProvider(provider = {}) {
     id,
     kind,
     execute: provider.execute,
+    ...(provider.tier != null ? { tier: normalizeExecutionTier(provider.tier, 'renderProvider.tier') } : {}),
   };
 }
 
@@ -321,12 +344,227 @@ export function normalizeRenderJob(job = {}) {
     job.renderProvider?.kind || 'screencast',
     'renderJob.kind',
   );
+  let id = cleanString(job.id, 'render-job') || 'render-job';
+  if (kind === 'native-segment') {
+    let nativeJob = normalizeNativeSegmentJob(job, { path: 'renderJob' });
+    return { ...nativeJob, id, kind, providerId, tier: nativeJob.tier };
+  }
   return {
     ...job,
-    id: cleanString(job.id, 'render-job') || 'render-job',
+    id,
     kind,
     providerId,
+    ...(job.tier != null ? { tier: normalizeExecutionTier(job.tier, 'renderJob.tier') } : {}),
   };
+}
+
+function artifactHash(value, path) {
+  let text = cleanString(value, '');
+  if (!text) fail(path, 'is required');
+  if (!ARTIFACT_HASH_RE.test(text)) fail(path, 'must be a hex digest or sha256: reference');
+  return text;
+}
+
+function normalizeArtifactContinuation(value, tier, path) {
+  requireObject(value, path);
+  let mode = cleanString(value.mode, '');
+  if (tier === 'sequential-realtime') {
+    if (mode !== 'continuous') fail(`${path}.mode`, 'must be "continuous" for sequential-realtime');
+    if (value.replayRef != null || value.checkpointRef != null) {
+      fail(path, 'must not carry replay or checkpoint refs for sequential-realtime');
+    }
+    return { mode: 'continuous' };
+  }
+  if (tier === 'replayable-segment') {
+    if (mode !== 'replay') fail(`${path}.mode`, 'must be "replay" for replayable-segment');
+    if (value.checkpointRef != null) fail(path, 'must not carry checkpoint refs for replayable-segment');
+    return {
+      mode: 'replay',
+      replayRef: portableRef(value.replayRef, `${path}.replayRef`),
+      replayEvidenceHash: artifactHash(value.replayEvidenceHash, `${path}.replayEvidenceHash`),
+    };
+  }
+  if (mode !== 'checkpoint') fail(`${path}.mode`, 'must be "checkpoint" for checkpointed-deterministic');
+  if (value.replayRef != null) fail(path, 'must not carry replay refs for checkpointed-deterministic');
+  return {
+    mode: 'checkpoint',
+    checkpointRef: portableRef(value.checkpointRef, `${path}.checkpointRef`),
+    checkpointHash: artifactHash(value.checkpointHash, `${path}.checkpointHash`),
+  };
+}
+
+function normalizeClockEvidence(value, tier, path) {
+  requireObject(value, path);
+  let mode = cleanString(value.mode, '');
+  if (!CLOCK_MODES.has(mode)) fail(`${path}.mode`, `must be one of ${[...CLOCK_MODES].join(', ')}`);
+  let rate = Number(value.rate);
+  if (!Number.isFinite(rate) || rate <= 0) fail(`${path}.rate`, 'must be a positive number');
+  if (tier === 'sequential-realtime' || tier === 'replayable-segment') {
+    if (mode !== 'wall-clock' || rate !== 1) {
+      fail(path, `must be wall-clock at rate 1 for ${tier}`);
+    }
+    return { mode, rate };
+  }
+  let normalized = { mode, rate };
+  if (mode === 'render-time' || rate !== 1) {
+    normalized.clockEquivalenceProofRef = portableRef(
+      value.clockEquivalenceProofRef,
+      `${path}.clockEquivalenceProofRef`,
+    );
+  } else if (value.clockEquivalenceProofRef != null && value.clockEquivalenceProofRef !== '') {
+    normalized.clockEquivalenceProofRef = portableRef(
+      value.clockEquivalenceProofRef,
+      `${path}.clockEquivalenceProofRef`,
+    );
+  }
+  return normalized;
+}
+
+function crossCheckSelectionReceipt(receipt, segment, path) {
+  if (receipt.tier !== segment.tier) {
+    fail(`${path}.tier`, `must equal segment tier "${segment.tier}"`);
+  }
+  if (receipt.ok !== true) {
+    fail(`${path}.ok`, 'must be true for a successful native segment artifact');
+  }
+  for (let role of ['renderer', 'encoder']) {
+    let entry = receipt[role];
+    if (!entry.selected) {
+      fail(`${path}.${role}.selected`, 'is required and must be a proven candidate');
+    }
+    if (!accelerationCandidateProven(entry.selected)) {
+      fail(`${path}.${role}.selected`, 'must be a semantically proven acceleration candidate');
+    }
+    let requiredBackend = cleanString(entry.requested.requiredBackend, '');
+    let requiredCodec = role === 'encoder' ? cleanString(entry.requested.requiredCodec, '') : '';
+    let selectedCodec = role === 'encoder' ? cleanString(entry.selected.codec, '') : '';
+    if (role === 'encoder' && !selectedCodec) {
+      fail(`${path}.encoder.selected.codec`, 'is required for an encoded segment artifact');
+    }
+    let selectionUsesFallback = Boolean(
+      requiredBackend && entry.selected.backend !== requiredBackend
+      || requiredCodec && selectedCodec !== requiredCodec,
+    );
+    if (selectionUsesFallback) {
+      if (entry.requested.allowFallback !== true) {
+        fail(`${path}.${role}.selected`, 'does not satisfy the requested backend or codec and fallback is disabled');
+      }
+      if (entry.fallbackUsed !== true) {
+        fail(`${path}.${role}.fallbackUsed`, 'must be true when the selected candidate does not satisfy the request');
+      }
+    } else if (entry.fallbackUsed === true) {
+      fail(`${path}.${role}.fallbackUsed`, 'must be false when the selected candidate satisfies the request');
+    }
+  }
+  let videoCodec = segment.videoCodec;
+  if (videoCodec) {
+    let selectedCodec = cleanString(receipt.encoder.selected.codec, '');
+    if (selectedCodec !== videoCodec) {
+      fail(`${path}.encoder.selected.codec`, `must equal artifact videoCodec "${videoCodec}"`);
+    }
+  }
+  let selectedContainer = cleanString(receipt.encoder.selected.container, '');
+  if (selectedContainer && selectedContainer !== segment.container) {
+    fail(`${path}.encoder.selected.container`, `must equal artifact container "${segment.container}"`);
+  }
+  let selectedPixelFormat = cleanString(receipt.encoder.selected.pixelFormat, '');
+  if (selectedPixelFormat && selectedPixelFormat !== segment.pixelFormat) {
+    fail(`${path}.encoder.selected.pixelFormat`, `must equal artifact pixelFormat "${segment.pixelFormat}"`);
+  }
+}
+
+function rationalEqual(a, b) {
+  return Boolean(a) && Boolean(b) && a.num === b.num && a.den === b.den;
+}
+
+function roleRequestEqual(actual, expected, role) {
+  if (actual.allowFallback !== expected.allowFallback) return false;
+  if (cleanString(actual.requiredBackend, '') !== cleanString(expected.requiredBackend, '')) return false;
+  if (role === 'encoder'
+    && cleanString(actual.requiredCodec, '') !== cleanString(expected.requiredCodec, '')) return false;
+  return true;
+}
+
+function valueEqual(actual, expected) {
+  return (actual ?? null) === (expected ?? null);
+}
+
+function crossCheckArtifactJob(artifact, job, segment) {
+  let p = 'renderArtifact';
+  if (segment.tier !== job.tier) fail(`${p}.tier`, `must equal job tier "${job.tier}"`);
+  if (segment.frameRange.start !== job.logicalRange.start || segment.frameRange.end !== job.logicalRange.end) {
+    fail(`${p}.frameRange`, 'must equal job logicalRange');
+  }
+  if (segment.captureRange.start !== job.captureRange.start || segment.captureRange.end !== job.captureRange.end) {
+    fail(`${p}.captureRange`, 'must equal job captureRange');
+  }
+  if (segment.prerollFrames !== job.prerollFrames) {
+    fail(`${p}.prerollFrames`, `must equal job prerollFrames ${job.prerollFrames}`);
+  }
+  if (segment.postrollFrames !== job.postrollFrames) {
+    fail(`${p}.postrollFrames`, `must equal job postrollFrames ${job.postrollFrames}`);
+  }
+  if (artifact.continuationEvidence.mode !== job.continuation.mode) {
+    fail(`${p}.continuationEvidence.mode`, `must equal job continuation mode "${job.continuation.mode}"`);
+  }
+  if ((artifact.continuationEvidence.replayRef ?? null) !== (job.continuation.replayRef ?? null)
+    || (artifact.continuationEvidence.replayEvidenceHash ?? null) !== (job.continuation.replayEvidenceHash ?? null)
+    || (artifact.continuationEvidence.checkpointRef ?? null) !== (job.continuation.checkpointRef ?? null)
+    || (artifact.continuationEvidence.checkpointHash ?? null) !== (job.continuation.checkpointHash ?? null)) {
+    fail(`${p}.continuationEvidence`, 'refs and hashes must match the job continuation');
+  }
+  if (artifact.clockEvidence.mode !== job.uiClock.mode
+    || artifact.clockEvidence.rate !== job.uiClock.rate
+    || (artifact.clockEvidence.clockEquivalenceProofRef ?? null)
+      !== (job.uiClock.clockEquivalenceProofRef ?? null)) {
+    fail(`${p}.clockEvidence`, 'must match the complete job uiClock evidence');
+  }
+  if (artifact.width !== job.viewport.width
+    || artifact.height !== job.viewport.height
+    || segment.dpr !== job.viewport.dpr) {
+    fail(`${p}.viewport`, 'width/height/dpr must match the job viewport');
+  }
+  if (!rationalEqual(segment.frameRate, job.frameRate)) fail(`${p}.frameRate`, 'must equal job frameRate');
+  if (!rationalEqual(segment.timeBase, job.timeBase)) fail(`${p}.timeBase`, 'must equal job timeBase');
+  if (segment.frameDurationTicks !== job.frameDurationTicks) {
+    fail(`${p}.frameDurationTicks`, `must equal job frameDurationTicks ${job.frameDurationTicks}`);
+  }
+  if (segment.sourceHash !== job.sourceHash) fail(`${p}.sourceHash`, 'must equal job sourceHash');
+  if (segment.settingsHash !== job.settingsHash) fail(`${p}.settingsHash`, 'must equal job settingsHash');
+  for (let field of [
+    'container',
+    'videoCodec',
+    'audioCodec',
+    'pixelFormat',
+    'colorSpace',
+    'colorPrimaries',
+    'colorTransfer',
+    'colorRange',
+    'chromaLocation',
+    'audioSampleRate',
+    'audioChannels',
+    'audioChannelLayout',
+  ]) {
+    if (!valueEqual(segment[field], job[field])) fail(`${p}.${field}`, `must equal job ${field}`);
+  }
+  if (!rationalEqual(segment.audioTimeBase, job.audioTimeBase)) {
+    if (segment.audioTimeBase !== null || job.audioTimeBase !== null) {
+      fail(`${p}.audioTimeBase`, 'must equal job audioTimeBase');
+    }
+  }
+  if (artifact.renderSelectionReceipt.tier !== job.capability.tier) {
+    fail(`${p}.renderSelectionReceipt.tier`, `must equal job capability tier "${job.capability.tier}"`);
+  }
+  for (let role of ['renderer', 'encoder']) {
+    if (!roleRequestEqual(
+      artifact.renderSelectionReceipt[role].requested,
+      job.capability[role],
+      role,
+    )) {
+      fail(`${p}.renderSelectionReceipt.${role}.requested`, 'must equal the job capability request');
+    }
+  }
+  if (artifact.cleanupRef !== job.cleanupRef) fail(`${p}.cleanupRef`, 'must equal job cleanupRef');
 }
 
 export function normalizeRenderArtifact(result = {}, context = {}) {
@@ -339,6 +577,16 @@ export function normalizeRenderArtifact(result = {}, context = {}) {
     context.kind || 'screencast',
     'renderArtifact.kind',
   );
+  if (kind === 'native-segment') {
+    // Reject fractional dims/frames before the rounding positiveInteger helper can
+    // let a value like frames:9.6 round up and spuriously satisfy the frameCount check.
+    for (let field of ['frames', 'width', 'height']) {
+      let raw = Number(result[field]);
+      if (!Number.isInteger(raw) || raw <= 0) fail(`renderArtifact.${field}`, 'must be a positive integer');
+    }
+    let rawFps = Number(result.fps);
+    if (!Number.isFinite(rawFps) || rawFps <= 0) fail('renderArtifact.fps', 'must be a positive number');
+  }
   let common = {
     kind,
     providerId,
@@ -358,6 +606,72 @@ export function normalizeRenderArtifact(result = {}, context = {}) {
       path,
       ...common,
     };
+  }
+
+  if (kind === 'native-segment') {
+    let segment = normalizeNativeSegment(result, { path: 'renderArtifact.segment' });
+    if (context.tier != null) {
+      let contextTier = normalizeExecutionTier(context.tier, 'renderArtifact.context.tier');
+      if (segment.tier !== contextTier) {
+        fail('renderArtifact.tier', `must equal provider/job tier "${contextTier}"`);
+      }
+    }
+    if (common.frames !== segment.frameCount) {
+      fail('renderArtifact.frames', `must equal segment frameCount ${segment.frameCount}`);
+    }
+    if (common.width !== segment.width) {
+      fail('renderArtifact.width', `must equal segment width ${segment.width}`);
+    }
+    if (common.height !== segment.height) {
+      fail('renderArtifact.height', `must equal segment height ${segment.height}`);
+    }
+    let cadenceFps = segment.frameRate.num / segment.frameRate.den;
+    let fpsTolerance = 1e-6 * cadenceFps + 1e-9;
+    if (Math.abs(common.fps - cadenceFps) > fpsTolerance) {
+      fail(
+        'renderArtifact.fps',
+        `must match frameRate cadence ${segment.frameRate.num}/${segment.frameRate.den}`,
+      );
+    }
+    let expectedLastPts = segment.firstPts + (segment.frameCount - 1) * segment.frameDurationTicks;
+    if (segment.lastPts !== expectedLastPts) {
+      fail('renderArtifact.lastPts', `must equal firstPts + (frameCount - 1) * frameDurationTicks (${expectedLastPts})`);
+    }
+    let expectedSec = segment.frameCount * segment.frameDurationTicks * segment.timeBase.num / segment.timeBase.den;
+    let durationTolerance = Math.max(1e-6, Math.abs(expectedSec) * 1e-9);
+    if (Math.abs(common.durationSec - expectedSec) > durationTolerance) {
+      fail('renderArtifact.durationSec', `must equal frameCount*frameDurationTicks*timeBase (${expectedSec})`);
+    }
+    let mediaRef = portableRef(result.mediaRef, 'renderArtifact.mediaRef');
+    let renderSelectionReceipt = normalizeAccelerationSelection(
+      requireObject(result.renderSelectionReceipt, 'renderArtifact.renderSelectionReceipt'),
+    );
+    crossCheckSelectionReceipt(renderSelectionReceipt, segment, 'renderArtifact.renderSelectionReceipt');
+    let continuationEvidence = normalizeArtifactContinuation(
+      result.continuationEvidence,
+      segment.tier,
+      'renderArtifact.continuationEvidence',
+    );
+    let clockEvidence = normalizeClockEvidence(result.clockEvidence, segment.tier, 'renderArtifact.clockEvidence');
+    let cleanupRef = portableRef(result.cleanupRef, 'renderArtifact.cleanupRef');
+    let proof = requireObject(result.proof, 'renderArtifact.proof');
+    if (proof.ok !== true) {
+      fail('renderArtifact.proof.ok', 'must be true for a successful native segment artifact');
+    }
+    let artifact = {
+      ...segment,
+      ...common,
+      mediaRef,
+      renderSelectionReceipt,
+      continuationEvidence,
+      clockEvidence,
+      cleanupRef,
+      proof,
+    };
+    if (context.job != null) {
+      crossCheckArtifactJob(artifact, context.job, segment);
+    }
+    return artifact;
   }
 
   let framesDir = cleanString(result.framesDir, '');
@@ -428,10 +742,18 @@ export function createRenderProviderRegistry(providers = []) {
           `provider "${provider.id}" handles "${provider.kind}", got "${normalizedJob.kind}"`,
         );
       }
+      if (provider.tier != null && normalizedJob.tier != null && provider.tier !== normalizedJob.tier) {
+        fail(
+          'renderJob.tier',
+          `provider "${provider.id}" runs "${provider.tier}", got "${normalizedJob.tier}"`,
+        );
+      }
       let result = await provider.execute(normalizedJob, options);
       return normalizeRenderArtifact(result, {
         providerId: provider.id,
         kind: provider.kind,
+        tier: normalizedJob.tier ?? provider.tier,
+        ...(normalizedJob.kind === 'native-segment' ? { job: normalizedJob } : {}),
       });
     },
   };

@@ -172,6 +172,44 @@ export function buildAudioConcatArgs(options = {}) {
   ];
 }
 
+export function buildSegmentConcatListLine(filePath) {
+  return buildAudioConcatListLine(filePath);
+}
+
+export function buildSegmentConcatArgs(options = {}) {
+  let {
+    concatListPath = '',
+    outputPath = '',
+    mode = 'stream-copy',
+    videoCodec = 'libx264',
+    audioCodec = 'aac',
+    crf = '18',
+    preset = 'fast',
+  } = options || {};
+  let safeConcatListPath = rawPath(concatListPath);
+  let safeOutputPath = rawPath(outputPath);
+  if (!safeConcatListPath) throw new Error('segment concat requires concatListPath');
+  if (!safeOutputPath) throw new Error('segment concat requires outputPath');
+  let safeMode = cleanString(mode, 'stream-copy') || 'stream-copy';
+  if (safeMode !== 'stream-copy' && safeMode !== 're-encode') {
+    throw new Error('segment concat mode must be stream-copy or re-encode');
+  }
+  let args = ['-y', '-f', 'concat', '-safe', '0', '-i', safeConcatListPath];
+  if (safeMode === 'stream-copy') {
+    args.push('-c', 'copy');
+  } else {
+    args.push(
+      '-c:v', codecValue(videoCodec, 'libx264'),
+      '-crf', String(crf ?? '18'),
+      '-preset', codecValue(preset, 'fast'),
+    );
+    let safeAudioCodec = cleanString(audioCodec, '');
+    if (safeAudioCodec) args.push('-c:a', safeAudioCodec);
+  }
+  args.push(safeOutputPath);
+  return args;
+}
+
 export function buildAudioOverlapMixArgs(options = {}) {
   let {
     clips = [],

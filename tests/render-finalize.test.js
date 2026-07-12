@@ -10,6 +10,8 @@ import {
   buildCaptionOverlayFilter,
   buildFrameSequenceEncodeArgs,
   buildRenderProofManifestProjection,
+  buildSegmentConcatArgs,
+  buildSegmentConcatListLine,
   parseFfprobeJson,
   projectRenderProofManifestState,
 } from '../render-finalize.js';
@@ -261,4 +263,34 @@ test('render finalize projects proof manifest state with a stable field set', ()
     output: { sha256: 'abc' },
   });
   assert.deepEqual(projectRenderProofManifestState(null, ['cacheKey']), { cacheKey: undefined });
+});
+
+test('segment concat list line reuses the escaped audio concat quoting', () => {
+  assert.equal(buildSegmentConcatListLine("/cache/seg's-01.mp4"), "file '/cache/seg'\\''s-01.mp4'");
+});
+
+test('segment concat stream-copies segments without re-encoding', () => {
+  assert.deepEqual(
+    buildSegmentConcatArgs({ concatListPath: '/cache/list.txt', outputPath: '/cache/out.mp4' }),
+    ['-y', '-f', 'concat', '-safe', '0', '-i', '/cache/list.txt', '-c', 'copy', '/cache/out.mp4'],
+  );
+});
+
+test('segment concat re-encode is explicit and never silently copies', () => {
+  assert.deepEqual(
+    buildSegmentConcatArgs({
+      concatListPath: '/cache/list.txt',
+      outputPath: '/cache/out.mp4',
+      mode: 're-encode',
+      videoCodec: 'libx264',
+      audioCodec: 'aac',
+      crf: '20',
+      preset: 'medium',
+    }),
+    [
+      '-y', '-f', 'concat', '-safe', '0', '-i', '/cache/list.txt',
+      '-c:v', 'libx264', '-crf', '20', '-preset', 'medium', '-c:a', 'aac', '/cache/out.mp4',
+    ],
+  );
+  assert.throws(() => buildSegmentConcatArgs({ concatListPath: '/l', outputPath: '/o', mode: 'guess' }), /stream-copy or re-encode/);
 });

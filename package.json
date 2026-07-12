@@ -24,6 +24,9 @@
     "./render-progress": "./render-progress.js",
     "./render-workers": "./render-workers.js",
     "./render-jobs": "./render-jobs.js",
+    "./render-selection": "./render-selection.js",
+    "./render-segments": "./render-segments.js",
+    "./render-admission": "./render-admission.js",
     "./providers/*": "./providers/*",
     "./packs/*": "./packs/*",
     "./package.json": "./package.json"

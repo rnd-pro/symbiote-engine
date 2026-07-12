@@ -143,7 +143,15 @@ symbiote-engine inspect workflow.json --json
   and serialization exports.
 - `symbiote-engine/cli` — workflow runner and inspection commands.
 - `symbiote-engine/contracts` — normalized resource, document, persistence,
-  render-provider, and audio-provider contract helpers.
+  render-provider, audio-provider, render-capability, native-segment, and
+  browser-codec contract helpers. Render capability contracts declare the three
+  execution tiers (`sequential-realtime`, `replayable-segment`,
+  `checkpointed-deterministic`), independent renderer/encoder candidates with a
+  strict usability predicate, versioned native encoded-segment job and artifact
+  contracts (logical/capture ranges, preroll/postroll, continuation/checkpoint
+  and UI-clock evidence, exact `frameDurationTicks` cadence, master media
+  reference, and full color/audio stream-layout compatibility fields), and a
+  versioned seam-policy/seam-boundary descriptor.
 - `symbiote-engine/artifacts` — Node-only content-addressed artifact store.
 - `symbiote-engine/providers/local-audio-tts.js` — Node-only local TTS transport
   with mandatory canonical v2 `X-Audio-Receipt` verification. The HMAC-bound
@@ -154,8 +162,10 @@ symbiote-engine inspect workflow.json --json
   threshold-failing, or inconsistent receipts fail before artifact writes.
 - `symbiote-engine/provider-jobs` — engine-owned provider job queue primitives
   with model-service readiness gating.
-- `symbiote-engine/render-cache` — Node-only frame cache keys, in-memory frame
-  cache store, render retention cleanup, and cleanup proof evidence helpers.
+- `symbiote-engine/render-cache` — Node-only frame cache keys, segment-addressed
+  cache keys and range-scoped invalidation (a changed source or settings range
+  never invalidates unrelated compatible segments), in-memory frame cache store,
+  render retention cleanup, and cleanup proof evidence helpers.
 - `symbiote-engine/render-finalize` — frame-sequence encode args, audio
   concat/mix/mux args, ffprobe JSON parsing, and neutral proof manifest
   projection/state helpers.
@@ -163,12 +173,48 @@ symbiote-engine inspect workflow.json --json
   job patches, queue snapshots, terminal error factories, and stable render
   error taxonomy helpers.
 - `symbiote-engine/render-proof` — ffprobe stream normalization,
-  audio/speaker layer proof, A/V sync, frame completeness, and pure
-  throughput/resource proof helpers for provider-backed render pipelines.
+  audio/speaker layer proof, A/V sync, frame completeness, segment seam
+  (exact/perceptual over a versioned seam-boundary input requiring an explicit
+  canonical overlap owner matching the seam policy; rejects duplicate boundary
+  PTS, logical frame/PTS gaps or overlaps, and capture-coverage holes so each
+  canonical logical frame maps to exactly one segment even when capture ranges
+  overlap), exact-cadence stream-PTS (requires a positive
+  integer `ptsStep`, fails closed on an empty frame stream, requires a non-empty
+  identity and non-negative integer index per frame, and rejects duplicate/
+  reordered/gapped identity, index, and PTS while a static scene's repeated pixel
+  hashes stay valid), and pure throughput/resource proof helpers for
+  provider-backed render pipelines.
 - `symbiote-engine/render-jobs` — engine-owned render provider job queue
   primitives with progress, timeout, cancel, cache-hit, and cleanup events.
 - `symbiote-engine/render-workers` — contiguous frame-range partitioning and
   ordered completion tracking for bounded parallel capture.
+- `symbiote-engine/render-selection` — independent renderer/encoder capability
+  negotiation. Produces a selection receipt with evidence, requested policy,
+  allowed fallback, and explicit rejection reasons. Usability is gated by the
+  shared `accelerationCandidateProven` predicate: a renderer needs an available
+  `renderer-identity` probe with a real identity and an encoder an available
+  `real-encode` probe with `encodeOk:true`; a device node or probe-name flag
+  alone is never usable and fallback is never silent. Final native artifacts
+  also bind the receipt's requested backend/codec/fallback policy, selected
+  codec, continuation hashes, and clock-equivalence proof to the originating
+  job.
+- `symbiote-engine/render-segments` — native encoded-segment compatibility and
+  concat planning. Stream-copy requires positive compatibility evidence
+  (container, codec, geometry, time-base, pixel format, color, video extradata,
+  stream layout, and — when audio exists — audio codec/sample-rate/channels/
+  layout/time-base/extradata) and fails closed when any is missing; logical
+  ranges must be contiguous and adjacent boundary PTS exactly one frame-duration
+  apart. Color/audio/codec/geometry/time-base/extradata/stream-layout mismatches
+  are separately reported; frame-range and PTS continuity defects are fatal even
+  under re-encode (it cannot invent missing source frames); groups split at every
+  incompatible boundary; duplicate segment ids are rejected; and re-encode is
+  always an explicit result.
+- `symbiote-engine/render-admission` — hard pre-dispatch capacity admission that
+  fails closed: it validates the tier, requires an explicit allowed-tier policy
+  and finite positive limits, requires positive correctly-typed dimensions and a
+  positive integer worker count, binds `sequential-realtime` to exactly one
+  worker, and rejects (never clamps) missing fields/limits, over-limit values,
+  memory/storage estimates, and over-capacity worker counts.
 - `symbiote-engine/packs/*` — reusable domain packs and node handlers.
 - `symbiote-engine/providers/*` — injectable local provider implementations,
   including browser screencast and local audio HTTP clients.

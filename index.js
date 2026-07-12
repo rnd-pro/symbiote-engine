@@ -77,6 +77,37 @@ export {
   normalizeVoiceReference,
 } from './contracts/index.js';
 
+export {
+  BROWSER_CODEC_SUPPORT_VERSION,
+  NATIVE_SEGMENT_ARTIFACT_VERSION,
+  NATIVE_SEGMENT_JOB_VERSION,
+  RENDER_ACCELERATION_PROBES,
+  RENDER_ACCELERATION_ROLES,
+  RENDER_CAPABILITY_CONTRACT_VERSION,
+  RENDER_DIAGNOSTIC_SURFACES,
+  RENDER_EXECUTION_TIERS,
+  RENDER_SEAM_INPUT_VERSION,
+  RENDER_SEAM_OWNERSHIP,
+  RENDER_SEAM_POLICIES,
+  UI_CLOCK_MODES,
+  accelerationCandidateProven,
+  normalizeAccelerationCandidate,
+  normalizeAccelerationSelection,
+  normalizeBrowserCodecSupport,
+  normalizeCapabilityRequest,
+  normalizeExecutionTier,
+  normalizeNativeSegment,
+  normalizeNativeSegmentJob,
+  normalizeRational,
+  normalizeSeamBoundary,
+  normalizeSeamPolicy,
+  segmentCompatibilityKey,
+} from './contracts/index.js';
+
+export { RENDER_SELECTION_VERSION, selectRenderAcceleration } from './render-selection.js';
+export { planSegmentConcat } from './render-segments.js';
+export { RENDER_ADMISSION_VERSION, admitRenderRequest } from './render-admission.js';
+
 export { createLocalBrowserScreencastProvider } from './providers/local-browser-screencast.js';
 export {
   createRenderFrameCompletionTracker,
@@ -91,8 +122,10 @@ export {
   createRenderFrameCacheKey,
   createRenderOutputCacheKey,
   createRenderSeedProjection,
+  createRenderSegmentCacheKey,
   createRenderRetentionCleanup,
   didCleanupRemovePaths,
+  invalidateRenderSegmentRanges,
   normalizeRenderSeed,
 } from './render-cache.js';
 export { createRenderJobCacheKey, createRenderProviderJobQueue } from './render-jobs.js';
@@ -117,6 +150,8 @@ export {
   buildAudioOverlapMixArgs,
   buildFrameSequenceEncodeArgs,
   buildRenderProofManifestProjection,
+  buildSegmentConcatArgs,
+  buildSegmentConcatListLine,
   parseFfprobeJson,
   projectRenderProofManifestState,
 } from './render-finalize.js';
@@ -129,15 +164,20 @@ export {
   isRenderTimeout,
   isTerminalRenderStatus,
   mapRenderEventToProgress,
+  reconcileTerminalRenderStatus,
 } from './render-lifecycle.js';
 export {
   RENDER_FRAME_COMPLETENESS_PROOF_VERSION,
   RENDER_PERFORMANCE_PROOF_VERSION,
+  RENDER_SEGMENT_SEAM_PROOF_VERSION,
+  RENDER_STREAM_PTS_PROOF_VERSION,
   RENDER_WORKER_CAPACITY_PROOF_VERSION,
   buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
   buildRenderFrameCompletenessProof,
   buildRenderPerformanceProof,
+  buildRenderSegmentSeamProof,
+  buildRenderStreamPtsProof,
   buildRenderWorkerCapacityProof,
   countClipOverlaps,
   durationDriftMs,
