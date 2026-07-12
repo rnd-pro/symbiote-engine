@@ -524,6 +524,24 @@ function normalizeVideo(video = {}) {
   };
 }
 
+const LOCKED_SEAM_SSIM_MINIMUM = 0.999999;
+
+function normalizeSeamSsim(value) {
+  if (value === undefined) {
+    return LOCKED_SEAM_SSIM_MINIMUM;
+  }
+  let requested = Number(value);
+  if (!Number.isFinite(requested) || requested > 1 || requested < LOCKED_SEAM_SSIM_MINIMUM) {
+    let error = new Error(
+      `renderJob.renderClock.seamSsim: must be a number between ${LOCKED_SEAM_SSIM_MINIMUM} and 1 `
+        + '(locked exact-browser-pixel seam requirement)',
+    );
+    error.code = 'RENDER_SEAM_THRESHOLD_INVALID';
+    throw error;
+  }
+  return requested;
+}
+
 function normalizeRenderClock(job, executionOptions, providerOptions, video) {
   let source = job.renderClock && typeof job.renderClock === 'object' ? job.renderClock : null;
   let requestedWorkers = Math.max(1, Math.floor(Number(
@@ -561,10 +579,7 @@ function normalizeRenderClock(job, executionOptions, providerOptions, video) {
     error.code = 'RENDER_SETUP_STATE_REQUIRED';
     throw error;
   }
-  let requestedSeamSsim = Number(source.seamSsim ?? 0.999999);
-  let seamSsim = Number.isFinite(requestedSeamSsim)
-    ? Math.min(1, Math.max(0.99, requestedSeamSsim))
-    : 0.999999;
+  let seamSsim = normalizeSeamSsim(source.seamSsim);
   return {
     mode,
     path,
@@ -960,7 +975,8 @@ async function verifyWorkerSeams({
       };
       let contentMatches = Boolean(before.contentDigest)
         && before.contentDigest === after.contentDigest;
-      let exactPixelsMatch = before.pixelHash === after.pixelHash;
+      let exactPixelsMatch = Boolean(before.pixelHash)
+        && before.pixelHash === after.pixelHash;
       let ssim = exactPixelsMatch ? 1 : 0;
       if (!exactPixelsMatch) {
         let comparison = await execFile(ffmpegPath, [
@@ -971,9 +987,11 @@ async function verifyWorkerSeams({
           '-',
         ]);
         let match = String(comparison?.stderr || '').match(/All:([0-9.]+)/);
-        ssim = Number(match?.[1] || 0);
+        let measured = Number(match?.[1]);
+        ssim = Number.isFinite(measured) ? measured : 0;
       }
-      let pixelsMatch = exactPixelsMatch || ssim >= renderClock.seamSsim;
+      let pixelsMatch = exactPixelsMatch
+        || (Number.isFinite(ssim) && ssim >= renderClock.seamSsim);
       let proof = {
         frame,
         elapsedMs: before.elapsedMs,

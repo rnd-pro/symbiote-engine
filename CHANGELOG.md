@@ -21,6 +21,12 @@
 - Made parallel deterministic capture fail closed by handing an opaque canonical
   setup state from the leader to peer browsers and verifying content plus
   near-lossless boundary pixels before encoding independently rendered ranges.
+- Hardened the deterministic worker seam threshold so a requested `seamSsim`
+  below the locked exact-browser-pixel minimum (`0.999999`), NaN, or out-of-range
+  value fails closed instead of being silently clamped, and rejected malformed or
+  missing measured seam evidence from passing while preserving the exact-pixel
+  fast path and the measured ssim, requiredSsim, match flags, worker ids, and
+  frame in normalized seam-proof evidence.
 - Added audio provider contract helpers, an engine-owned provider job queue,
   a content-addressed artifact store, and an injectable local TTS HTTP provider
   for local audio generation pipelines.

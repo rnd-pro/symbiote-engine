@@ -767,6 +767,235 @@ test('parallel deterministic capture fails closed when worker seam content diffe
   ]);
 });
 
+function createSeamProbeProvider(tmp, { ssimStderr = 'SSIM All:0.9999995', pixelContent, ffmpegCalls } = {}) {
+  let launchIndex = 0;
+  return createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        let workerIndex = launchIndex;
+        launchIndex += 1;
+        let page = {
+          mouse: { click: async () => {} },
+          async setViewport() {},
+          async goto() {},
+          async waitForFunction() {},
+          async evaluate(_fn, arg) {
+            if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1 };
+            if (arg?.methodParts?.at(-1) === 'importState') return { imported: true };
+            if (arg?.frameContext) {
+              return {
+                presentedTimeMs: arg.frameContext.timeMs,
+                projectionId: `probe:${arg.frameContext.frameIndex}`,
+                contentDigest: `content:${arg.frameContext.frameIndex}`,
+              };
+            }
+            return { settled: true };
+          },
+          async screenshot(options) {
+            let frame = Number(options.path.match(/frame-(\d+)/)?.[1]);
+            let isProof = options.path.includes('.seam-');
+            let content = typeof pixelContent === 'function'
+              ? pixelContent({ frame, isProof })
+              : `frame:${frame}`;
+            await writeFile(options.path, content);
+          },
+        };
+        return {
+          process() { return { pid: 10 + workerIndex * 10 }; },
+          async newPage() { return page; },
+          async close() {},
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async (command, args) => {
+      if (command === 'ffmpeg') {
+        ffmpegCalls?.push(args);
+        return { stderr: ssimStderr };
+      }
+      return {};
+    },
+  });
+}
+
+function seamProbeJob(renderClockExtras = {}) {
+  return {
+    id: 'seam-threshold',
+    frameFormat: 'webp',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 67, frameCount: 2 },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 2,
+      settleFrames: 0,
+      warmupPresentations: 0,
+      setupState: TEST_SETUP_STATE,
+      ...renderClockExtras,
+    },
+  };
+}
+
+const seamProbeOptions = (tmp) => ({ artifactKind: 'frame-sequence', browserProfileRoot: tmp });
+
+const nonExactPixels = ({ frame, isProof }) => (isProof ? `proof:${frame}` : `frame:${frame}`);
+
+test('deterministic distributed capture rejects a seam threshold below the locked minimum', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-seam-below-min-'));
+  let provider = createSeamProbeProvider(tmp);
+  await assert.rejects(
+    provider.execute(seamProbeJob({ seamSsim: 0.99 }), seamProbeOptions(tmp)),
+    /renderJob\.renderClock\.seamSsim: must be a number between 0\.999999 and 1/,
+  );
+});
+
+test('deterministic distributed capture rejects malformed and out-of-range seam thresholds', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-seam-invalid-'));
+  for (let seamSsim of [null, '', 'not-a-number', Number.NaN, Infinity, 1.5, -0.5]) {
+    let provider = createSeamProbeProvider(tmp);
+    await assert.rejects(
+      provider.execute(seamProbeJob({ seamSsim }), seamProbeOptions(tmp)),
+      (error) => (
+        error?.code === 'RENDER_SEAM_THRESHOLD_INVALID'
+          && /renderJob\.renderClock\.seamSsim: must be a number between 0\.999999 and 1/.test(error.message)
+      ),
+    );
+  }
+});
+
+test('deterministic distributed capture accepts the locked seam minimum and preserves measured evidence', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-seam-accepted-'));
+  let provider = createSeamProbeProvider(tmp, {
+    ssimStderr: 'SSIM All:0.9999995',
+    pixelContent: nonExactPixels,
+  });
+  let result = await provider.execute(seamProbeJob({ seamSsim: 0.999999 }), seamProbeOptions(tmp));
+  assert.equal(result.capture.seamProofs.length, 1);
+  let proof = result.capture.seamProofs[0];
+  assert.equal(proof.frame, 1);
+  assert.deepEqual(proof.workers, [0, 1]);
+  assert.equal(proof.requiredSsim, 0.999999);
+  assert.equal(proof.ssim, 0.9999995);
+  assert.equal(proof.exactPixelsMatch, false);
+  assert.equal(proof.pixelsMatch, true);
+  assert.equal(proof.contentMatches, true);
+  assert.equal(proof.contentDigest, 'content:1');
+  assert.equal(proof.peerContentDigest, 'content:1');
+  assert.match(proof.pixelHash, /^[a-f0-9]{64}$/);
+  assert.match(proof.peerPixelHash, /^[a-f0-9]{64}$/);
+  assert.notEqual(proof.pixelHash, proof.peerPixelHash);
+});
+
+test('deterministic distributed capture passes the seam through the exact-pixel fast path', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-seam-exact-'));
+  let ffmpegCalls = [];
+  let provider = createSeamProbeProvider(tmp, {
+    ffmpegCalls,
+    pixelContent: ({ frame }) => `identical:${frame}`,
+  });
+  let result = await provider.execute(seamProbeJob(), seamProbeOptions(tmp));
+  let proof = result.capture.seamProofs[0];
+  assert.equal(proof.exactPixelsMatch, true);
+  assert.equal(proof.pixelsMatch, true);
+  assert.equal(proof.ssim, 1);
+  assert.equal(proof.requiredSsim, 0.999999);
+  assert.equal(proof.pixelHash, proof.peerPixelHash);
+  assert.equal(ffmpegCalls.length, 0);
+});
+
+test('deterministic distributed capture passes when measured ssim meets the locked threshold exactly', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-seam-boundary-pass-'));
+  let provider = createSeamProbeProvider(tmp, {
+    ssimStderr: 'SSIM All:0.999999',
+    pixelContent: nonExactPixels,
+  });
+  let result = await provider.execute(seamProbeJob(), seamProbeOptions(tmp));
+  let proof = result.capture.seamProofs[0];
+  assert.equal(proof.exactPixelsMatch, false);
+  assert.equal(proof.ssim, 0.999999);
+  assert.equal(proof.requiredSsim, 0.999999);
+  assert.equal(proof.pixelsMatch, true);
+});
+
+test('deterministic distributed capture fails closed when measured ssim falls below the locked threshold', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-seam-boundary-fail-'));
+  let provider = createSeamProbeProvider(tmp, {
+    ssimStderr: 'SSIM All:0.999998',
+    pixelContent: nonExactPixels,
+  });
+  await assert.rejects(
+    provider.execute(seamProbeJob(), seamProbeOptions(tmp)),
+    (error) => (
+      error?.code === 'RENDER_SEAM_MISMATCH'
+        && error?.proof?.exactPixelsMatch === false
+        && error?.proof?.pixelsMatch === false
+        && error?.proof?.ssim === 0.999998
+        && error?.proof?.requiredSsim === 0.999999
+    ),
+  );
+});
+
+test('deterministic distributed capture fails closed on malformed seam ssim evidence', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-seam-malformed-'));
+  let provider = createSeamProbeProvider(tmp, {
+    ssimStderr: 'SSIM produced no comparable score',
+    pixelContent: nonExactPixels,
+  });
+  await assert.rejects(
+    provider.execute(seamProbeJob(), seamProbeOptions(tmp)),
+    (error) => (
+      error?.code === 'RENDER_SEAM_MISMATCH'
+        && error?.proof?.exactPixelsMatch === false
+        && error?.proof?.pixelsMatch === false
+        && error?.proof?.ssim === 0
+        && error?.proof?.requiredSsim === 0.999999
+    ),
+  );
+});
+
+test('render artifact contract keeps omitted seam proof evidence from becoming a pass', () => {
+  let normalized = normalizeRenderArtifact({
+    kind: 'frame-sequence',
+    providerId: 'p',
+    frames: 1,
+    fps: 30,
+    durationSec: 1 / 30,
+    width: 320,
+    height: 180,
+    framesDir: '/tmp/frames',
+    frameFiles: [{ path: '/tmp/frames/frame-00000.webp', mimeType: 'image/webp' }],
+    source: { url: 'http://example.test/render' },
+    capture: {
+      mode: 'deterministic',
+      workerCount: 2,
+      workerRanges: [],
+      seamProofs: [{
+        frame: 1,
+        workers: [0, 1],
+        ssim: 0.5,
+        requiredSsim: 0.999999,
+        pixelHash: 'a'.repeat(64),
+        peerPixelHash: 'b'.repeat(64),
+      }],
+    },
+  });
+  let proof = normalized.capture.seamProofs[0];
+  assert.equal(proof.frame, 1);
+  assert.deepEqual(proof.workers, [0, 1]);
+  assert.equal(proof.pixelsMatch, false);
+  assert.equal(proof.exactPixelsMatch, false);
+  assert.equal(proof.contentMatches, false);
+  assert.equal(proof.ssim, 0.5);
+  assert.equal(proof.requiredSsim, 0.999999);
+  assert.equal(proof.pixelHash, 'a'.repeat(64));
+  assert.equal(proof.peerPixelHash, 'b'.repeat(64));
+});
+
 test('parallel deterministic capture bootstraps the predecessor when warmup is disabled', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-boundary-bootstrap-'));
   let workers = [];
