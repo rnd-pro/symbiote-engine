@@ -620,6 +620,9 @@ test('local browser screencast provider renders deterministic ranges in parallel
   assert.equal(progress.at(-1).contiguousFrames, 6);
   assert.equal(progress.at(-1).frame, 6);
   assert.ok(events.some((event) => event.stage === 'capture-worker:start' && event.workerIndex === 1));
+  assert.equal(events.filter((event) => event.stage === 'capture-worker:warmed').length, 2);
+  assert.equal(pages[0].filter((event) => event === 'render:0').length, 2);
+  assert.equal(pages[1].filter((event) => event === 'render:3').length, 2);
   for (let pageEvents of pages) {
     for (let event of pageEvents.filter((item) => item.startsWith('screenshot:'))) {
       let frame = event.split(':')[1];

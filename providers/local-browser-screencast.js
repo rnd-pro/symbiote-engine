@@ -906,6 +906,24 @@ async function captureBrowserWorker({
   let stateSamples = [];
   let frameFiles = [];
   emitStage(executionOptions, 'capture-worker:start', detail);
+  let warmupElapsedMs = range.startFrame * frameIntervalMs;
+  await callRenderAt(page, renderClock, {
+    timeMs: warmupElapsedMs,
+    frameIndex: range.startFrame,
+    fps: video.fps,
+    durationMs: video.durationMs,
+    workerIndex: range.workerIndex,
+    range: { startFrame: range.startFrame, endFrame: range.endFrame },
+    warmup: true,
+  }, signal);
+  let warmupCaption = captionAt(job.captions, warmupElapsedMs);
+  await withAbort(setCaption(page, warmupCaption), signal);
+  lastCaptionKey = warmupCaption ? `${warmupCaption.speaker}:${warmupCaption.text}` : '';
+  emitStage(executionOptions, 'capture-worker:warmed', {
+    ...detail,
+    frame: range.startFrame,
+    elapsedMs: Math.round(warmupElapsedMs),
+  });
   for (let frame = range.startFrame; frame <= range.endFrame; frame += 1) {
     assertNotAborted(signal);
     let elapsedMs = frame * frameIntervalMs;
