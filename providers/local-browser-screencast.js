@@ -912,11 +912,15 @@ async function captureBrowserWorker({
   let stateSamples = [];
   let frameFiles = [];
   emitStage(executionOptions, 'capture-worker:start', detail);
-  let warmupElapsedMs = range.startFrame * frameIntervalMs;
-  for (let presentation = 0; presentation < renderClock.warmupPresentations; presentation += 1) {
+  let warmupFrame = Math.max(0, range.startFrame - 1);
+  let warmupElapsedMs = warmupFrame * frameIntervalMs;
+  let warmupPresentations = range.startFrame > 0
+    ? Math.max(1, renderClock.warmupPresentations)
+    : renderClock.warmupPresentations;
+  for (let presentation = 0; presentation < warmupPresentations; presentation += 1) {
     await callRenderAt(page, renderClock, {
       timeMs: warmupElapsedMs,
-      frameIndex: range.startFrame,
+      frameIndex: warmupFrame,
       fps: video.fps,
       durationMs: video.durationMs,
       workerIndex: range.workerIndex,
@@ -930,9 +934,11 @@ async function captureBrowserWorker({
   lastCaptionKey = warmupCaption ? `${warmupCaption.speaker}:${warmupCaption.text}` : '';
   emitStage(executionOptions, 'capture-worker:warmed', {
     ...detail,
-    frame: range.startFrame,
+    frame: warmupFrame,
+    warmupFrame,
+    boundaryFrame: range.startFrame,
     elapsedMs: Math.round(warmupElapsedMs),
-    presentations: renderClock.warmupPresentations,
+    presentations: warmupPresentations,
   });
   for (let frame = range.startFrame; frame <= range.endFrame; frame += 1) {
     assertNotAborted(signal);

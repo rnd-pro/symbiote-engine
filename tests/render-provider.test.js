@@ -530,6 +530,7 @@ test('local browser screencast provider renders deterministic ranges in parallel
       let workerIndex = launches.length;
       launches.push(options);
       let pageEvents = [];
+      let renderCounts = new Map();
       let page = {
         mouse: { click: async () => {} },
         async setViewport() {},
@@ -542,11 +543,16 @@ test('local browser screencast provider renders deterministic ranges in parallel
             return { imported: true };
           }
           if (arg?.frameContext) {
-            pageEvents.push(`render:${arg.frameContext.frameIndex}`);
+            let frameIndex = arg.frameContext.frameIndex;
+            let renderCount = (renderCounts.get(frameIndex) || 0) + 1;
+            renderCounts.set(frameIndex, renderCount);
+            pageEvents.push(`render:${frameIndex}`);
             return {
               presentedTimeMs: arg.frameContext.timeMs,
-              projectionId: `fixture:${arg.frameContext.frameIndex}`,
-              contentDigest: `content:${arg.frameContext.frameIndex}`,
+              projectionId: `fixture:${frameIndex}`,
+              contentDigest: frameIndex === 3 && renderCount > 1
+                ? 'content:3:repeated'
+                : `content:${frameIndex}`,
             };
           }
           if (arg?.settleFrames != null) {
@@ -625,8 +631,14 @@ test('local browser screencast provider renders deterministic ranges in parallel
     events.filter((event) => event.stage === 'capture-worker:warmed').map((event) => event.presentations),
     [2, 2],
   );
+  assert.deepEqual(
+    events.filter((event) => event.stage === 'capture-worker:warmed')
+      .map((event) => [event.warmupFrame, event.boundaryFrame, event.elapsedMs]),
+    [[0, 0, 0], [2, 3, 67]],
+  );
   assert.equal(pages[0].filter((event) => event === 'render:0').length, 3);
-  assert.equal(pages[1].filter((event) => event === 'render:3').length, 3);
+  assert.equal(pages[1].filter((event) => event === 'render:2').length, 2);
+  assert.equal(pages[1].filter((event) => event === 'render:3').length, 1);
   for (let pageEvents of pages) {
     for (let event of pageEvents.filter((item) => item.startsWith('screenshot:'))) {
       let frame = event.split(':')[1];
@@ -692,6 +704,85 @@ test('parallel deterministic capture fails closed when worker seam content diffe
       && error?.proof?.contentMatches === false
       && error?.proof?.pixelsMatch === true
   ));
+});
+
+test('parallel deterministic capture bootstraps the predecessor when warmup is disabled', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-boundary-bootstrap-'));
+  let workers = [];
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        let calls = [];
+        workers.push(calls);
+        let page = {
+          mouse: { click: async () => {} },
+          async setViewport() {},
+          async goto() {},
+          async waitForFunction() {},
+          async evaluate(_fn, arg) {
+            if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1 };
+            if (arg?.methodParts?.at(-1) === 'importState') return { imported: true };
+            if (arg?.frameContext) {
+              calls.push({
+                type: 'render',
+                frame: arg.frameContext.frameIndex,
+                warmup: arg.frameContext.warmup === true,
+              });
+              return {
+                presentedTimeMs: arg.frameContext.timeMs,
+                projectionId: `bootstrap:${arg.frameContext.frameIndex}`,
+                contentDigest: `content:${arg.frameContext.frameIndex}`,
+              };
+            }
+            if (arg?.speaker) calls.push({ type: 'caption', text: arg.text });
+            return { settled: true };
+          },
+          async screenshot(options) {
+            let frame = Number(options.path.match(/frame-(\d+)/)?.[1]);
+            await writeFile(options.path, `frame:${frame}`);
+          },
+        };
+        return { async newPage() { return page; }, async close() {} };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => ({ stderr: 'SSIM All:1.000000' }),
+  });
+
+  await provider.execute({
+    id: 'boundary-bootstrap',
+    frameFormat: 'webp',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 67, frameCount: 2 },
+    setup: [],
+    timeline: [],
+    captions: {
+      enabled: true,
+      cues: [
+        { startMs: 0, endMs: 20, speaker: 'Guide', text: 'Before' },
+        { startMs: 20, endMs: 67, speaker: 'Guide', text: 'Boundary' },
+      ],
+    },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 2,
+      settleFrames: 0,
+      warmupPresentations: 0,
+      setupState: TEST_SETUP_STATE,
+    },
+  }, { artifactKind: 'frame-sequence', browserProfileRoot: tmp });
+
+  assert.deepEqual(workers[1].filter((call) => call.type === 'render'), [
+    { type: 'render', frame: 0, warmup: true },
+    { type: 'render', frame: 1, warmup: false },
+  ]);
+  assert.deepEqual(workers[1].filter((call) => call.type === 'caption').map((call) => call.text), [
+    'Before',
+    'Boundary',
+  ]);
 });
 
 test('deterministic capture bounds a hanging browser close and records the timeout', async () => {
