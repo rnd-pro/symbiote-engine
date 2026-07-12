@@ -4,6 +4,7 @@ import { createRenderFrameCompletionTracker } from './render-workers.js';
 
 export const RENDER_FRAME_COMPLETENESS_PROOF_VERSION = 'render-frame-completeness-v1';
 export const RENDER_PERFORMANCE_PROOF_VERSION = 'render-performance-v1';
+export const RENDER_WORKER_CAPACITY_PROOF_VERSION = 'render-worker-capacity-v1';
 
 function positiveInteger(value, path) {
   let number = Number(value);
@@ -93,6 +94,8 @@ export function buildRenderPerformanceProof(options = {}) {
     finiteNonNegativeNumber(options.peakPreviewWorkingSetBytes, 0),
     peakSample(options.previewSamples, 'decodedBytes'),
   );
+  let resourceSamplesRecorded = peakRssBytes > 0;
+  let previewSamplesRecorded = peakPreviewWorkingSetBytes > 0;
   let mediaDurationMs = frameCount / fps * 1000;
   let captureFps = frameCount / (captureDurationMs / 1000);
   let encodeFps = frameCount / (encodeDurationMs / 1000);
@@ -103,6 +106,10 @@ export function buildRenderPerformanceProof(options = {}) {
     captureRealtimeRatio: captureRealtimeRatio <= thresholds.maxCaptureRealtimeRatio,
     peakRssBytes: peakRssBytes <= thresholds.maxPeakRssBytes,
     peakPreviewWorkingSetBytes: peakPreviewWorkingSetBytes <= thresholds.maxPreviewWorkingSetBytes,
+    ...(options.requireResourceSamples === true ? {
+      resourceSamplesRecorded,
+      previewSamplesRecorded,
+    } : {}),
   };
   let errors = Object.entries(checks)
     .filter(([, passed]) => !passed)
@@ -121,7 +128,59 @@ export function buildRenderPerformanceProof(options = {}) {
     captureRealtimeRatio: Math.round(captureRealtimeRatio * 1000) / 1000,
     peakRssBytes,
     peakPreviewWorkingSetBytes,
+    resourceSamplesRecorded,
+    previewSamplesRecorded,
     thresholds,
+    checks,
+  };
+}
+
+export function buildRenderWorkerCapacityProof(options = {}) {
+  let requestedWorkers = positiveInteger(options.requestedWorkers, 'requestedWorkers');
+  let totalMemoryBytes = finitePositiveNumber(options.totalMemoryBytes, 0);
+  let availableMemoryBytes = finitePositiveNumber(options.availableMemoryBytes, 0);
+  let systemReserveBytes = finiteNonNegativeNumber(options.systemReserveBytes, 0);
+  let fixedOverheadBytes = finiteNonNegativeNumber(options.fixedOverheadBytes, 0);
+  let perWorkerPeakRssBytes = finitePositiveNumber(options.perWorkerPeakRssBytes, 0);
+  let safetyFactor = finitePositiveNumber(options.safetyFactor, 1.25);
+  let maxPerWorkerRssBytes = finitePositiveNumber(options.maxPerWorkerRssBytes, Number.MAX_SAFE_INTEGER);
+  if (!totalMemoryBytes) throw new TypeError('totalMemoryBytes must be positive');
+  if (!availableMemoryBytes) throw new TypeError('availableMemoryBytes must be positive');
+  if (!perWorkerPeakRssBytes) throw new TypeError('perWorkerPeakRssBytes must be positive');
+  if (safetyFactor < 1) throw new TypeError('safetyFactor must be at least 1');
+  let usableMemoryBytes = Math.max(0, Math.min(
+    availableMemoryBytes,
+    totalMemoryBytes - systemReserveBytes,
+  ));
+  let guardedPerWorkerBytes = Math.ceil(perWorkerPeakRssBytes * safetyFactor);
+  let requiredMemoryBytes = fixedOverheadBytes + guardedPerWorkerBytes * requestedWorkers;
+  let maxAdmittedWorkers = Math.max(0, Math.floor(
+    (usableMemoryBytes - fixedOverheadBytes) / guardedPerWorkerBytes,
+  ));
+  let checks = {
+    perWorkerPeakRssBytes: perWorkerPeakRssBytes <= maxPerWorkerRssBytes,
+    availableMemoryBytes: requiredMemoryBytes <= usableMemoryBytes,
+  };
+  let errors = Object.entries(checks)
+    .filter(([, passed]) => !passed)
+    .map(([name]) => `${name} exceeds its locked threshold`);
+  return {
+    version: RENDER_WORKER_CAPACITY_PROOF_VERSION,
+    ok: errors.length === 0,
+    errors,
+    requestedWorkers,
+    admittedWorkers: Math.min(requestedWorkers, maxAdmittedWorkers),
+    maxAdmittedWorkers,
+    totalMemoryBytes,
+    availableMemoryBytes,
+    systemReserveBytes,
+    usableMemoryBytes,
+    fixedOverheadBytes,
+    perWorkerPeakRssBytes,
+    safetyFactor,
+    guardedPerWorkerBytes,
+    requiredMemoryBytes,
+    maxPerWorkerRssBytes,
     checks,
   };
 }

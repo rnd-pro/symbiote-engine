@@ -10,11 +10,34 @@ import {
   normalizeRenderArtifact,
   normalizeRenderProvider,
 } from '../contracts/render-provider.js';
-import { createLocalBrowserScreencastProvider } from '../providers/local-browser-screencast.js';
+import {
+  createLocalBrowserScreencastProvider,
+  sampleProcessTreeRss,
+} from '../providers/local-browser-screencast.js';
 
 const TEST_SETUP_STATE = Object.freeze({
   exportPath: '__fixture.exportState',
   importPath: '__fixture.importState',
+});
+
+test('process tree RSS sampler attributes descendants to browser workers', async () => {
+  let sample = await sampleProcessTreeRss({
+    roots: [{ workerIndex: 0, pid: 10 }, { workerIndex: 1, pid: 20 }],
+    atMs: 250,
+    execFile: async () => ({ stdout: [
+      '10 1 100',
+      '11 10 50',
+      '12 11 25',
+      '20 1 120',
+      '21 20 30',
+      '99 1 999',
+    ].join('\n') }),
+  });
+
+  assert.equal(sample.atMs, 250);
+  assert.equal(sample.processCount, 5);
+  assert.equal(sample.rssBytes, (100 + 50 + 25 + 120 + 30) * 1024);
+  assert.deepEqual(sample.workers.map((worker) => worker.rssBytes), [175 * 1024, 150 * 1024]);
 });
 
 test('render provider contract validates providers and rejects duplicate ids', async () => {
@@ -204,6 +227,14 @@ test('render artifact contract supports ordered frame-sequence metadata', () => 
       workerCount: 1,
       durationMs: 12,
       throughputFps: 83.333,
+      peakRssBytes: 2048,
+      workerPeakRssBytes: { 0: 2048 },
+      resourceSamples: [{
+        atMs: 4,
+        rssBytes: 2048,
+        processCount: 2,
+        workers: [{ workerIndex: 0, pid: 10, processCount: 2, rssBytes: 2048 }],
+      }],
       frameTimeSource: 'page-render-clock',
       workerRanges: [{
         workerIndex: 0,
@@ -212,11 +243,22 @@ test('render artifact contract supports ordered frame-sequence metadata', () => 
         frameCount: 1,
         warmupDurationMs: 8,
         captureDurationMs: 4,
+        phaseDurationMs: { render: 1, settle: 2, caption: 0, stateSample: 0, screenshot: 3 },
       }],
     },
   });
   assert.equal(capture.capture.mode, 'deterministic');
   assert.equal(capture.capture.workerRanges[0].warmupDurationMs, 8);
+  assert.deepEqual(capture.capture.workerRanges[0].phaseDurationMs, {
+    render: 1,
+    settle: 2,
+    caption: 0,
+    stateSample: 0,
+    screenshot: 3,
+  });
+  assert.equal(capture.capture.peakRssBytes, 2048);
+  assert.equal(capture.capture.workerPeakRssBytes[0], 2048);
+  assert.equal(capture.capture.resourceSamples[0].workers[0].pid, 10);
 });
 
 test('render provider contract stays browser-safe while local provider stays Node-only', async () => {
@@ -675,12 +717,18 @@ test('parallel deterministic capture fails closed when worker seam content diffe
           },
           async screenshot(options) { await writeFile(options.path, 'same pixels'); },
         };
-        return { async newPage() { return page; }, async close() {} };
+        return {
+          process() { return { pid: 10 + workerIndex * 10 }; },
+          async newPage() { return page; },
+          async close() {},
+        };
       },
     },
     cwd: tmp,
     framesRoot: tmp,
-    execFile: async () => {},
+    execFile: async (command) => command === 'ps'
+      ? { stdout: '10 1 100\n11 10 50\n20 1 120\n21 20 30\n' }
+      : {},
   });
   await assert.rejects(provider.execute({
     id: 'seam-mismatch',
@@ -697,7 +745,10 @@ test('parallel deterministic capture fails closed when worker seam content diffe
       workerCount: 2,
       setupState: TEST_SETUP_STATE,
     },
-    execution: { seamFailureDir },
+    execution: {
+      seamFailureDir,
+      resourceSampling: { enabled: true, required: true, intervalMs: 100 },
+    },
   }, {
     artifactKind: 'frame-sequence',
     browserProfileRoot: tmp,
@@ -706,6 +757,9 @@ test('parallel deterministic capture fails closed when worker seam content diffe
       && error?.proof?.contentMatches === false
       && error?.proof?.pixelsMatch === true
       && error?.proof?.diagnosticFiles?.length === 2
+      && error?.proof?.resourceMeasurement?.sampleCount >= 1
+      && error?.proof?.resourceMeasurement?.peakRssBytes > 0
+      && error?.proof?.workerRanges?.length === 2
   ));
   assert.deepEqual((await readdir(seamFailureDir)).sort(), [
     'frame-00001-worker-0.webp',
@@ -930,6 +984,7 @@ test('deterministic worker failure aborts and closes the entire pool', async () 
           async screenshot() {},
         };
         return {
+          process() { return { pid: 10 + workerIndex * 10 }; },
           async newPage() { return page; },
           async close() { closed.push(workerIndex); },
         };
@@ -937,7 +992,9 @@ test('deterministic worker failure aborts and closes the entire pool', async () 
     },
     cwd: tmp,
     framesRoot: tmp,
-    execFile: async () => {},
+    execFile: async (command) => command === 'ps'
+      ? { stdout: '10 1 100\n11 10 50\n20 1 120\n21 20 30\n' }
+      : {},
   });
 
   await assert.rejects(provider.execute({
@@ -952,7 +1009,17 @@ test('deterministic worker failure aborts and closes the entire pool', async () 
       workerCount: 2,
       setupState: TEST_SETUP_STATE,
     },
-  }, { artifactKind: 'frame-sequence', browserProfileRoot: tmp }), /render hook failed/);
+  }, {
+    artifactKind: 'frame-sequence',
+    browserProfileRoot: tmp,
+    resourceSampling: { enabled: true, required: true, intervalMs: 100 },
+  }), (error) => (
+    /render hook failed/.test(error.message)
+      && error.proof?.resourceMeasurement?.sampleCount >= 1
+      && error.proof?.resourceMeasurement?.peakRssBytes > 0
+      && error.proof?.workerRanges?.length >= 1
+      && Boolean(error.proof.workerRanges[0].phaseDurationMs)
+  ));
   assert.deepEqual(closed.sort(), [0, 1]);
 });
 

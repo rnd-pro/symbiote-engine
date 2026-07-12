@@ -121,6 +121,102 @@ async function fileSha256(path) {
   return sha256(await readFile(path));
 }
 
+function browserProcessId(browser) {
+  let pid = Number(browser?.process?.()?.pid);
+  return Number.isInteger(pid) && pid > 0 ? pid : null;
+}
+
+async function resolveBrowserProcessId(browser) {
+  let direct = browserProcessId(browser);
+  if (direct) return direct;
+  let reported = Number(await browser?.processId?.());
+  return Number.isInteger(reported) && reported > 0 ? reported : null;
+}
+
+export async function sampleProcessTreeRss({ execFile = defaultExecFile, roots = [], atMs = Date.now() } = {}) {
+  let normalizedRoots = roots
+    .map((root) => ({ workerIndex: Number(root?.workerIndex), pid: Number(root?.pid) }))
+    .filter((root) => Number.isInteger(root.workerIndex) && Number.isInteger(root.pid) && root.pid > 0);
+  if (normalizedRoots.length === 0) throw new Error('process RSS sampling requires browser process roots');
+  let result = await execFile('ps', ['-axo', 'pid=,ppid=,rss=']);
+  let processes = String(result?.stdout || '')
+    .split(/\r?\n/u)
+    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)$/u))
+    .filter(Boolean)
+    .map((match) => ({ pid: Number(match[1]), parentPid: Number(match[2]), rssBytes: Number(match[3]) * 1024 }));
+  let children = new Map();
+  for (let process of processes) {
+    let list = children.get(process.parentPid) || [];
+    list.push(process.pid);
+    children.set(process.parentPid, list);
+  }
+  let byPid = new Map(processes.map((process) => [process.pid, process]));
+  let claimed = new Set();
+  let workers = normalizedRoots.map((root) => {
+    let pending = [root.pid];
+    let pids = [];
+    let rssBytes = 0;
+    while (pending.length) {
+      let pid = pending.pop();
+      if (claimed.has(pid)) continue;
+      claimed.add(pid);
+      pids.push(pid);
+      rssBytes += byPid.get(pid)?.rssBytes || 0;
+      pending.push(...(children.get(pid) || []));
+    }
+    return { workerIndex: root.workerIndex, pid: root.pid, processCount: pids.length, rssBytes };
+  });
+  return {
+    atMs: Math.max(0, Math.round(Number(atMs) || 0)),
+    rssBytes: workers.reduce((total, worker) => total + worker.rssBytes, 0),
+    processCount: claimed.size,
+    workers,
+  };
+}
+
+async function startProcessTreeRssSampling({ execFile, prepared, intervalMs, required }) {
+  let roots = (await Promise.all(prepared.map(async (worker) => ({
+    workerIndex: worker.range.workerIndex,
+    pid: await resolveBrowserProcessId(worker.browser),
+  })))).filter((root) => root.pid);
+  let samples = [];
+  let samplingError = null;
+  let pending = null;
+  let startedAt = Date.now();
+  async function takeSample() {
+    if (pending) return pending;
+    pending = sampleProcessTreeRss({ execFile, roots, atMs: Date.now() - startedAt })
+      .then((sample) => samples.push(sample))
+      .catch((error) => { samplingError = samplingError || error; })
+      .finally(() => { pending = null; });
+    return pending;
+  }
+  void takeSample();
+  let timer = setInterval(() => { void takeSample(); }, intervalMs);
+  timer.unref?.();
+  return {
+    async stop() {
+      clearInterval(timer);
+      if (pending) await pending;
+      await takeSample();
+      if (required && samplingError) throw samplingError;
+      if (required && samples.length === 0) throw new Error('required process RSS sampling produced no samples');
+      let workerPeakRssBytes = Object.fromEntries(prepared.map((worker) => [worker.range.workerIndex, 0]));
+      for (let sample of samples) {
+        for (let worker of sample.workers) {
+          workerPeakRssBytes[worker.workerIndex] = Math.max(workerPeakRssBytes[worker.workerIndex] || 0, worker.rssBytes);
+        }
+      }
+      return {
+        samples,
+        peakRssBytes: samples.reduce((peak, sample) => Math.max(peak, sample.rssBytes), 0),
+        workerPeakRssBytes,
+        ...(samplingError ? { error: samplingError.message } : {}),
+      };
+    },
+  };
+}
+
 function validateRegexPattern(pattern, path) {
   let source = cleanString(pattern, '');
   if (!source) return;
@@ -515,6 +611,7 @@ function withTimeout(promise, timeoutMs, message) {
 
 async function callRenderAt(page, renderClock, frameContext, signal) {
   let methodParts = cleanPathParts(renderClock.path, 'renderJob.renderClock.path');
+  let renderStartedAt = Date.now();
   let result = await withTimeout(withAbort(page.evaluate(async ({ methodParts: parts, frameContext: context }) => {
     let owner = window;
     for (let index = 0; index < parts.length - 1; index += 1) owner = owner?.[parts[index]];
@@ -523,6 +620,7 @@ async function callRenderAt(page, renderClock, frameContext, signal) {
     return method.call(owner, context);
   }, { methodParts, frameContext }), signal), renderClock.timeoutMs,
   `render clock ${renderClock.path} timed out at frame ${frameContext.frameIndex}`);
+  let renderDurationMs = Date.now() - renderStartedAt;
   let presentedTimeMs = Number(result?.presentedTimeMs);
   if (!Number.isFinite(presentedTimeMs) || Math.abs(presentedTimeMs - frameContext.timeMs) > 0.01) {
     throw new Error(`render clock ${renderClock.path} presented invalid time at frame ${frameContext.frameIndex}`);
@@ -531,7 +629,9 @@ async function callRenderAt(page, renderClock, frameContext, signal) {
   if (!projectionId) {
     throw new Error(`render clock ${renderClock.path} returned no projectionId at frame ${frameContext.frameIndex}`);
   }
+  let settleDurationMs = 0;
   if (renderClock.settleFrames > 0) {
+    let settleStartedAt = Date.now();
     await withTimeout(withAbort(page.evaluate(async ({ settleFrames, frameIndex }) => {
       for (let index = 0; index < settleFrames; index += 1) {
         await new Promise((resolveFrame) => requestAnimationFrame(resolveFrame));
@@ -542,6 +642,7 @@ async function callRenderAt(page, renderClock, frameContext, signal) {
       frameIndex: frameContext.frameIndex,
     }), signal), renderClock.timeoutMs,
     `render presentation barrier timed out at frame ${frameContext.frameIndex}`);
+    settleDurationMs = Date.now() - settleStartedAt;
   }
   return {
     presentedTimeMs,
@@ -550,6 +651,7 @@ async function callRenderAt(page, renderClock, frameContext, signal) {
     contentEvidence: result?.contentEvidence && typeof result.contentEvidence === 'object'
       ? structuredClone(result.contentEvidence)
       : null,
+    timing: { renderDurationMs, settleDurationMs },
   };
 }
 
@@ -650,7 +752,12 @@ async function settleWorkerPool(tasks, controller) {
     throw error;
   }));
   let settled = await Promise.allSettled(promises);
-  if (firstFailure) throw firstFailure;
+  if (firstFailure) {
+    Object.defineProperty(firstFailure, 'workerResults', {
+      value: settled.filter((result) => result.status === 'fulfilled').map((result) => result.value),
+    });
+    throw firstFailure;
+  }
   return settled.map((result) => result.value);
 }
 
@@ -677,6 +784,9 @@ async function prepareBrowserWorker({
       `--window-size=${video.width},${video.height}`,
       '--no-sandbox',
       '--disable-setuid-sandbox',
+      '--disable-gpu',
+      '--disable-gpu-compositing',
+      '--disable-lcd-text',
       '--force-color-profile=srgb',
       '--hide-scrollbars',
     ],
@@ -788,7 +898,11 @@ async function captureSeamProofFrame({
     framesDir,
     `.seam-worker-${prepared.range.workerIndex}-frame-${String(frame).padStart(5, '0')}.${frameExtension}`,
   );
-  await withAbort(prepared.page.screenshot({ path, type: frameFormat, fullPage: false }), signal);
+  await withAbort(prepared.page.screenshot({
+    path,
+    type: frameFormat,
+    fullPage: false,
+  }), signal);
   return {
     workerIndex: prepared.range.workerIndex,
     frame,
@@ -925,93 +1039,116 @@ async function captureBrowserWorker({
   let startedAt = Date.now();
   let stateSamples = [];
   let frameFiles = [];
-  emitStage(executionOptions, 'capture-worker:start', detail);
-  let warmupFrame = Math.max(0, range.startFrame - 1);
-  let warmupElapsedMs = warmupFrame * frameIntervalMs;
-  let warmupPresentations = range.startFrame > 0
-    ? Math.max(1, renderClock.warmupPresentations)
-    : renderClock.warmupPresentations;
-  for (let presentation = 0; presentation < warmupPresentations; presentation += 1) {
-    await callRenderAt(page, renderClock, {
-      timeMs: warmupElapsedMs,
-      frameIndex: warmupFrame,
-      fps: video.fps,
-      durationMs: video.durationMs,
-      workerIndex: range.workerIndex,
-      range: { startFrame: range.startFrame, endFrame: range.endFrame },
-      warmup: true,
-      warmupPresentation: presentation,
-    }, signal);
-  }
-  let warmupCaption = captionAt(job.captions, warmupElapsedMs);
-  await withAbort(setCaption(page, warmupCaption), signal);
-  lastCaptionKey = warmupCaption ? `${warmupCaption.speaker}:${warmupCaption.text}` : '';
-  emitStage(executionOptions, 'capture-worker:warmed', {
-    ...detail,
-    frame: warmupFrame,
-    warmupFrame,
-    boundaryFrame: range.startFrame,
-    elapsedMs: Math.round(warmupElapsedMs),
-    presentations: warmupPresentations,
-  });
-  for (let frame = range.startFrame; frame <= range.endFrame; frame += 1) {
-    assertNotAborted(signal);
-    let elapsedMs = frame * frameIntervalMs;
-    let clockState = await callRenderAt(page, renderClock, {
-      timeMs: elapsedMs,
-      frameIndex: frame,
-      fps: video.fps,
-      durationMs: video.durationMs,
-      workerIndex: range.workerIndex,
-      range: { startFrame: range.startFrame, endFrame: range.endFrame },
-    }, signal);
-
-    let caption = captionAt(job.captions, elapsedMs);
-    let captionKey = caption ? `${caption.speaker}:${caption.text}` : '';
-    if (captionKey !== lastCaptionKey) {
-      await withAbort(setCaption(page, caption), signal);
-      lastCaptionKey = captionKey;
-    }
-
-    if (captureState && frame % captureState.sampleEveryFrames === 0) {
-      stateSamples.push({
-        frame,
-        elapsedMs: Math.round(elapsedMs),
-        state: await withAbort(captureWindowState(page, captureState), signal),
-        ...(clockState ? { renderClock: clockState } : {}),
-      });
-    }
-
-    let framePath = join(framesDir, `frame-${String(frame).padStart(5, '0')}.${frameExtension}`);
-    await withAbort(page.screenshot({
-      path: framePath,
-      type: frameFormat,
-      fullPage: false,
-    }), signal);
-    let frameFile = {
-      index: frame,
-      path: framePath,
-      elapsedMs: Math.round(elapsedMs),
-      mimeType: frameMimeType,
-      contentDigest: clockState.contentDigest,
-      contentEvidence: clockState.contentEvidence || null,
-    };
-    frameFiles.push(frameFile);
-    onFrame(frameFile, detail);
-
-  }
-  let captureDurationMs = Date.now() - startedAt;
-  emitStage(executionOptions, 'capture-worker:done', { ...detail, captureDurationMs });
-  return {
-    frameFiles,
-    stateSamples,
-    metric: {
-      ...detail,
-      frameCount: range.frameCount,
-      warmupDurationMs: prepared.warmupDurationMs,
-      captureDurationMs,
-    },
+  let phaseDurationMs = {
+    render: 0,
+    settle: 0,
+    caption: 0,
+    stateSample: 0,
+    screenshot: 0,
   };
+  let workerMetric = () => ({
+    ...detail,
+    frameCount: range.frameCount,
+    warmupDurationMs: prepared.warmupDurationMs,
+    captureDurationMs: Date.now() - startedAt,
+    phaseDurationMs,
+  });
+  try {
+    emitStage(executionOptions, 'capture-worker:start', detail);
+    let warmupFrame = Math.max(0, range.startFrame - 1);
+    let warmupElapsedMs = warmupFrame * frameIntervalMs;
+    let warmupPresentations = range.startFrame > 0
+      ? Math.max(1, renderClock.warmupPresentations)
+      : renderClock.warmupPresentations;
+    for (let presentation = 0; presentation < warmupPresentations; presentation += 1) {
+      await callRenderAt(page, renderClock, {
+        timeMs: warmupElapsedMs,
+        frameIndex: warmupFrame,
+        fps: video.fps,
+        durationMs: video.durationMs,
+        workerIndex: range.workerIndex,
+        range: { startFrame: range.startFrame, endFrame: range.endFrame },
+        warmup: true,
+        warmupPresentation: presentation,
+      }, signal);
+    }
+    let warmupCaption = captionAt(job.captions, warmupElapsedMs);
+    await withAbort(setCaption(page, warmupCaption), signal);
+    lastCaptionKey = warmupCaption ? `${warmupCaption.speaker}:${warmupCaption.text}` : '';
+    emitStage(executionOptions, 'capture-worker:warmed', {
+      ...detail,
+      frame: warmupFrame,
+      warmupFrame,
+      boundaryFrame: range.startFrame,
+      elapsedMs: Math.round(warmupElapsedMs),
+      presentations: warmupPresentations,
+    });
+    for (let frame = range.startFrame; frame <= range.endFrame; frame += 1) {
+      assertNotAborted(signal);
+      let elapsedMs = frame * frameIntervalMs;
+      let clockState = await callRenderAt(page, renderClock, {
+        timeMs: elapsedMs,
+        frameIndex: frame,
+        fps: video.fps,
+        durationMs: video.durationMs,
+        workerIndex: range.workerIndex,
+        range: { startFrame: range.startFrame, endFrame: range.endFrame },
+      }, signal);
+      let { timing: renderTiming, ...clockEvidence } = clockState;
+      phaseDurationMs.render += renderTiming.renderDurationMs;
+      phaseDurationMs.settle += renderTiming.settleDurationMs;
+
+      let caption = captionAt(job.captions, elapsedMs);
+      let captionKey = caption ? `${caption.speaker}:${caption.text}` : '';
+      if (captionKey !== lastCaptionKey) {
+        let captionStartedAt = Date.now();
+        await withAbort(setCaption(page, caption), signal);
+        phaseDurationMs.caption += Date.now() - captionStartedAt;
+        lastCaptionKey = captionKey;
+      }
+
+      if (captureState && frame % captureState.sampleEveryFrames === 0) {
+        let stateSampleStartedAt = Date.now();
+        stateSamples.push({
+          frame,
+          elapsedMs: Math.round(elapsedMs),
+          state: await withAbort(captureWindowState(page, captureState), signal),
+          renderClock: clockEvidence,
+        });
+        phaseDurationMs.stateSample += Date.now() - stateSampleStartedAt;
+      }
+
+      let framePath = join(framesDir, `frame-${String(frame).padStart(5, '0')}.${frameExtension}`);
+      let screenshotStartedAt = Date.now();
+      await withAbort(page.screenshot({
+        path: framePath,
+        type: frameFormat,
+        fullPage: false,
+      }), signal);
+      phaseDurationMs.screenshot += Date.now() - screenshotStartedAt;
+      let frameFile = {
+        index: frame,
+        path: framePath,
+        elapsedMs: Math.round(elapsedMs),
+        mimeType: frameMimeType,
+        contentDigest: clockState.contentDigest,
+        contentEvidence: clockState.contentEvidence || null,
+      };
+      frameFiles.push(frameFile);
+      onFrame(frameFile, detail);
+
+    }
+    let captureDurationMs = Date.now() - startedAt;
+    emitStage(executionOptions, 'capture-worker:done', { ...detail, captureDurationMs });
+    return {
+      frameFiles,
+      stateSamples,
+      metric: workerMetric(),
+    };
+  } catch (error) {
+    error.proof = { ...(error.proof || {}), workerRange: workerMetric() };
+    throw error;
+  }
 }
 
 async function executeDeterministicCapture({
@@ -1100,6 +1237,15 @@ async function executeDeterministicCapture({
       return worker;
     }), pool.controller);
     let prepared = [leader, ...peers];
+    let resourceSamplingOptions = executionOptions.resourceSampling || job.execution?.resourceSampling || {};
+    let resourceSampler = resourceSamplingOptions.enabled === true
+      ? await startProcessTreeRssSampling({
+        execFile,
+        prepared,
+        intervalMs: Math.max(100, Math.round(Number(resourceSamplingOptions.intervalMs) || 500)),
+        required: resourceSamplingOptions.required === true,
+      })
+      : null;
     let completion = createRenderFrameCompletionTracker(video.frameCount);
     emitStage(executionOptions, 'capture:start', {
       frames: video.frameCount,
@@ -1109,51 +1255,100 @@ async function executeDeterministicCapture({
       workerCount: ranges.length,
       mode: renderClock.mode,
     });
-    let workerResults = await settleWorkerPool(prepared.map((worker) => async () => (
-      captureBrowserWorker({
-        prepared: worker,
+    let workerResults;
+    let resourceMeasurement = null;
+    let workerFailure = null;
+    try {
+      workerResults = await settleWorkerPool(prepared.map((worker) => async () => (
+        captureBrowserWorker({
+          prepared: worker,
+          job,
+          video,
+          renderClock,
+          framesDir,
+          frameFormat,
+          frameExtension,
+          frameMimeType,
+          captureState,
+          signal: pool.controller.signal,
+          executionOptions,
+          onFrame(frameFile) {
+            let snapshot = completion.mark(frameFile.index);
+            if (typeof executionOptions.onProgress !== 'function') return;
+            executionOptions.onProgress({
+              frame: snapshot.contiguousFrames,
+              frames: video.frameCount,
+              completedFrames: snapshot.completedFrames,
+              contiguousFrames: snapshot.contiguousFrames,
+              progress: snapshot.progress,
+              contiguousProgress: snapshot.contiguousProgress,
+              stage: 'capture',
+              framesDir,
+              framePattern,
+              mimeType: frameMimeType,
+            });
+          },
+        })
+      )), pool.controller);
+    } catch (error) {
+      workerFailure = error;
+    } finally {
+      if (resourceSampler) {
+        try {
+          resourceMeasurement = await resourceSampler.stop();
+        } catch (error) {
+          workerFailure ||= error;
+        }
+      }
+    }
+    if (workerFailure) {
+      let workerRanges = [
+        ...(workerFailure.workerResults || []).map((result) => result.metric),
+        workerFailure.proof?.workerRange,
+      ].filter(Boolean).sort((a, b) => a.workerIndex - b.workerIndex);
+      workerFailure.proof = {
+        ...(workerFailure.proof || {}),
+        ...(resourceMeasurement ? {
+          resourceMeasurement: {
+            sampleCount: resourceMeasurement.samples.length,
+            peakRssBytes: resourceMeasurement.peakRssBytes,
+            workerPeakRssBytes: resourceMeasurement.workerPeakRssBytes,
+          },
+        } : {}),
+        workerRanges,
+      };
+      throw workerFailure;
+    }
+    let seamProofs;
+    try {
+      seamProofs = await verifyWorkerSeams({
+        prepared,
+        workerResults,
         job,
         video,
         renderClock,
         framesDir,
         frameFormat,
         frameExtension,
-        frameMimeType,
-        captureState,
+        execFile,
+        ffmpegPath,
         signal: pool.controller.signal,
         executionOptions,
-        onFrame(frameFile) {
-          let snapshot = completion.mark(frameFile.index);
-          if (typeof executionOptions.onProgress !== 'function') return;
-          executionOptions.onProgress({
-            frame: snapshot.contiguousFrames,
-            frames: video.frameCount,
-            completedFrames: snapshot.completedFrames,
-            contiguousFrames: snapshot.contiguousFrames,
-            progress: snapshot.progress,
-            contiguousProgress: snapshot.contiguousProgress,
-            stage: 'capture',
-            framesDir,
-            framePattern,
-            mimeType: frameMimeType,
-          });
-        },
-      })
-    )), pool.controller);
-    let seamProofs = await verifyWorkerSeams({
-      prepared,
-      workerResults,
-      job,
-      video,
-      renderClock,
-      framesDir,
-      frameFormat,
-      frameExtension,
-      execFile,
-      ffmpegPath,
-      signal: pool.controller.signal,
-      executionOptions,
-    });
+      });
+    } catch (error) {
+      if (resourceMeasurement) {
+        error.proof = {
+          ...(error.proof || {}),
+          resourceMeasurement: {
+            sampleCount: resourceMeasurement.samples.length,
+            peakRssBytes: resourceMeasurement.peakRssBytes,
+            workerPeakRssBytes: resourceMeasurement.workerPeakRssBytes,
+          },
+          workerRanges: workerResults.map((result) => result.metric),
+        };
+      }
+      throw error;
+    }
     let frameFiles = workerResults
       .flatMap((result) => result.frameFiles)
       .sort((a, b) => a.index - b.index);
@@ -1169,11 +1364,18 @@ async function executeDeterministicCapture({
         ? Math.round((video.frameCount / (durationMs / 1000)) * 1000) / 1000
         : 0,
       frameTimeSource: 'page-render-clock',
+      frameCaptureType: 'screenshot',
       ...(setupStateHash ? { setupStateHash } : {}),
       seamProofs,
       workerRanges: workerResults
         .map((result) => result.metric)
         .sort((a, b) => a.workerIndex - b.workerIndex),
+      ...(resourceMeasurement ? {
+        resourceSamples: resourceMeasurement.samples,
+        peakRssBytes: resourceMeasurement.peakRssBytes,
+        workerPeakRssBytes: resourceMeasurement.workerPeakRssBytes,
+        ...(resourceMeasurement.error ? { resourceSamplingError: resourceMeasurement.error } : {}),
+      } : {}),
     };
     let closeResults = [];
     for (let worker of activeWorkers.splice(0)) {

@@ -133,10 +133,12 @@ export {
 export {
   RENDER_FRAME_COMPLETENESS_PROOF_VERSION,
   RENDER_PERFORMANCE_PROOF_VERSION,
+  RENDER_WORKER_CAPACITY_PROOF_VERSION,
   buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
   buildRenderFrameCompletenessProof,
   buildRenderPerformanceProof,
+  buildRenderWorkerCapacityProof,
   countClipOverlaps,
   durationDriftMs,
   findProbeStream,

@@ -140,6 +140,7 @@ export function buildFrameSequenceEncodeArgs(options = {}) {
     buildCaptionOverlayFilter({ captionsPath: captionsBurnPath || captionsPath, captionStyle }),
   ].filter(Boolean);
   if (filters.length) args.push('-vf', filters.join(','));
+  args.push('-fps_mode', 'cfr', '-r', String(Math.max(1, Number(fps) || 1)));
   if (safeAudioPath) {
     args.push('-c:a', codecValue(audioCodec, 'aac'), '-b:a', codecValue(audioBitrate, '192k'));
   }

@@ -4,10 +4,12 @@ import { test } from 'node:test';
 import {
   RENDER_FRAME_COMPLETENESS_PROOF_VERSION,
   RENDER_PERFORMANCE_PROOF_VERSION,
+  RENDER_WORKER_CAPACITY_PROOF_VERSION,
   buildRenderAudioLayerProof,
   buildRenderAvSyncProof,
   buildRenderFrameCompletenessProof,
   buildRenderPerformanceProof,
+  buildRenderWorkerCapacityProof,
   countClipOverlaps,
   durationDriftMs,
   findProbeStream,
@@ -76,6 +78,43 @@ test('performance proof derives deterministic throughput and resource verdicts f
   assert.equal(pass.peakPreviewWorkingSetBytes, 800);
   assert.equal(fail.ok, false);
   assert.deepEqual(Object.values(fail.checks), [false, false, false, false, false]);
+});
+
+test('performance proof fails closed when locked resource samples are absent', () => {
+  let proof = buildRenderPerformanceProof({
+    frameCount: 300,
+    fps: 30,
+    captureDurationMs: 9000,
+    encodeDurationMs: 8000,
+    requireResourceSamples: true,
+  });
+
+  assert.equal(proof.ok, false);
+  assert.equal(proof.checks.resourceSamplesRecorded, false);
+  assert.equal(proof.checks.previewSamplesRecorded, false);
+});
+
+test('worker capacity proof admits or rejects measured pools without silent downgrade', () => {
+  let base = {
+    requestedWorkers: 4,
+    totalMemoryBytes: 8_000,
+    systemReserveBytes: 2_000,
+    fixedOverheadBytes: 500,
+    perWorkerPeakRssBytes: 1_000,
+    safetyFactor: 1.25,
+    maxPerWorkerRssBytes: 3_000,
+  };
+  let pass = buildRenderWorkerCapacityProof({ ...base, availableMemoryBytes: 6_000 });
+  let fail = buildRenderWorkerCapacityProof({ ...base, availableMemoryBytes: 4_000 });
+
+  assert.equal(pass.version, RENDER_WORKER_CAPACITY_PROOF_VERSION);
+  assert.equal(pass.ok, true);
+  assert.equal(pass.admittedWorkers, 4);
+  assert.equal(pass.requiredMemoryBytes, 5_500);
+  assert.equal(fail.ok, false);
+  assert.equal(fail.admittedWorkers, 2);
+  assert.equal(fail.requestedWorkers, 4);
+  assert.match(fail.errors.join('\n'), /availableMemoryBytes/);
 });
 
 function ffprobe({ videoDuration = '1.000000', audioDuration = '1.000000', videoCodec = 'h264', audioCodec = 'aac' } = {}) {

@@ -57,6 +57,7 @@ function normalizeRenderCapture(value) {
   }
   let workerRanges = (Array.isArray(capture.workerRanges) ? capture.workerRanges : []).map((range, index) => {
     requireObject(range, `renderArtifact.capture.workerRanges[${index}]`);
+    let phaseDurationMs = requireObject(range.phaseDurationMs || {}, `renderArtifact.capture.workerRanges[${index}].phaseDurationMs`);
     return {
       workerIndex: optionalNonNegativeInteger(range.workerIndex, `renderArtifact.capture.workerRanges[${index}].workerIndex`) ?? index,
       startFrame: optionalNonNegativeInteger(range.startFrame, `renderArtifact.capture.workerRanges[${index}].startFrame`) ?? 0,
@@ -64,6 +65,13 @@ function normalizeRenderCapture(value) {
       frameCount: positiveInteger(range.frameCount, undefined, `renderArtifact.capture.workerRanges[${index}].frameCount`),
       warmupDurationMs: optionalNonNegativeNumber(range.warmupDurationMs, `renderArtifact.capture.workerRanges[${index}].warmupDurationMs`) ?? 0,
       captureDurationMs: optionalNonNegativeNumber(range.captureDurationMs, `renderArtifact.capture.workerRanges[${index}].captureDurationMs`) ?? 0,
+      phaseDurationMs: {
+        render: optionalNonNegativeNumber(phaseDurationMs.render, `renderArtifact.capture.workerRanges[${index}].phaseDurationMs.render`) ?? 0,
+        settle: optionalNonNegativeNumber(phaseDurationMs.settle, `renderArtifact.capture.workerRanges[${index}].phaseDurationMs.settle`) ?? 0,
+        caption: optionalNonNegativeNumber(phaseDurationMs.caption, `renderArtifact.capture.workerRanges[${index}].phaseDurationMs.caption`) ?? 0,
+        stateSample: optionalNonNegativeNumber(phaseDurationMs.stateSample, `renderArtifact.capture.workerRanges[${index}].phaseDurationMs.stateSample`) ?? 0,
+        screenshot: optionalNonNegativeNumber(phaseDurationMs.screenshot, `renderArtifact.capture.workerRanges[${index}].phaseDurationMs.screenshot`) ?? 0,
+      },
     };
   });
   let seamProofs = (Array.isArray(capture.seamProofs) ? capture.seamProofs : []).map((proof, index) => {
@@ -88,6 +96,24 @@ function normalizeRenderCapture(value) {
       pixelsMatch: proof.pixelsMatch === true,
     };
   });
+  let resourceSamples = (Array.isArray(capture.resourceSamples) ? capture.resourceSamples : []).map((sample, index) => {
+    requireObject(sample, `renderArtifact.capture.resourceSamples[${index}]`);
+    return {
+      atMs: optionalNonNegativeNumber(sample.atMs, `renderArtifact.capture.resourceSamples[${index}].atMs`) ?? 0,
+      rssBytes: optionalNonNegativeNumber(sample.rssBytes, `renderArtifact.capture.resourceSamples[${index}].rssBytes`) ?? 0,
+      processCount: optionalNonNegativeInteger(sample.processCount, `renderArtifact.capture.resourceSamples[${index}].processCount`) ?? 0,
+      workers: (Array.isArray(sample.workers) ? sample.workers : []).map((worker, workerIndex) => ({
+        workerIndex: optionalNonNegativeInteger(worker.workerIndex, `renderArtifact.capture.resourceSamples[${index}].workers[${workerIndex}].workerIndex`) ?? workerIndex,
+        pid: optionalNonNegativeInteger(worker.pid, `renderArtifact.capture.resourceSamples[${index}].workers[${workerIndex}].pid`) ?? 0,
+        processCount: optionalNonNegativeInteger(worker.processCount, `renderArtifact.capture.resourceSamples[${index}].workers[${workerIndex}].processCount`) ?? 0,
+        rssBytes: optionalNonNegativeNumber(worker.rssBytes, `renderArtifact.capture.resourceSamples[${index}].workers[${workerIndex}].rssBytes`) ?? 0,
+      })),
+    };
+  });
+  let workerPeakRssBytes = Object.fromEntries(Object.entries(capture.workerPeakRssBytes || {}).map(([workerIndex, rssBytes]) => [
+    String(optionalNonNegativeInteger(workerIndex, `renderArtifact.capture.workerPeakRssBytes.${workerIndex}`) ?? 0),
+    optionalNonNegativeNumber(rssBytes, `renderArtifact.capture.workerPeakRssBytes.${workerIndex}`) ?? 0,
+  ]));
   return {
     mode,
     workerCount: positiveInteger(capture.workerCount, 1, 'renderArtifact.capture.workerCount'),
@@ -98,9 +124,18 @@ function normalizeRenderCapture(value) {
       'renderArtifact.capture.browserCloseTimeouts',
     ) ?? 0,
     frameTimeSource: cleanString(capture.frameTimeSource, mode === 'deterministic' ? 'page-render-clock' : 'wall-clock'),
+    frameCaptureType: cleanString(capture.frameCaptureType, 'screenshot'),
     setupStateHash: cleanString(capture.setupStateHash, ''),
     seamProofs,
     workerRanges,
+    ...(resourceSamples.length ? { resourceSamples } : {}),
+    ...(capture.peakRssBytes !== undefined ? {
+      peakRssBytes: optionalNonNegativeNumber(capture.peakRssBytes, 'renderArtifact.capture.peakRssBytes') ?? 0,
+    } : {}),
+    ...(Object.keys(workerPeakRssBytes).length ? { workerPeakRssBytes } : {}),
+    ...(cleanString(capture.resourceSamplingError, '') ? {
+      resourceSamplingError: cleanString(capture.resourceSamplingError, ''),
+    } : {}),
   };
 }
 

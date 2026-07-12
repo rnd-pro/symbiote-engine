@@ -34,6 +34,8 @@ test('render finalize builds frame sequence x264 args with optional audio', () =
       '-crf', '18',
       '-pix_fmt', 'yuv420p',
       '-vf', 'scale=1280:720',
+      '-fps_mode', 'cfr',
+      '-r', '12',
       '-c:a', 'aac',
       '-b:a', '192k',
       '/cache/render.mp4',
@@ -58,6 +60,8 @@ test('render finalize builds frame sequence x264 args with optional audio', () =
       '-crf', '18',
       '-pix_fmt', 'yuv420p',
       '-vf', 'scale=640:360',
+      '-fps_mode', 'cfr',
+      '-r', '30',
       'silent.mp4',
     ],
   );
