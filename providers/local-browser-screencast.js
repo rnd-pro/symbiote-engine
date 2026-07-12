@@ -787,6 +787,7 @@ async function captureSeamProofFrame({
     path,
     pixelHash: await fileSha256(path),
     contentDigest: clockState.contentDigest,
+    contentEvidence: clockState.contentEvidence || null,
   };
 }
 
@@ -832,6 +833,7 @@ async function verifyWorkerSeams({
         path: actual.path,
         pixelHash: await fileSha256(actual.path),
         contentDigest: actual.contentDigest,
+        contentEvidence: actual.contentEvidence || null,
       };
       let contentMatches = Boolean(before.contentDigest)
         && before.contentDigest === after.contentDigest;
@@ -855,6 +857,8 @@ async function verifyWorkerSeams({
         workers: [before.workerIndex, after.workerIndex],
         contentDigest: before.contentDigest,
         peerContentDigest: after.contentDigest,
+        contentEvidence: before.contentEvidence,
+        peerContentEvidence: after.contentEvidence,
         contentMatches,
         pixelHash: before.pixelHash,
         peerPixelHash: after.pixelHash,
@@ -939,6 +943,7 @@ async function captureBrowserWorker({
       elapsedMs: Math.round(elapsedMs),
       mimeType: frameMimeType,
       contentDigest: clockState.contentDigest,
+      contentEvidence: clockState.contentEvidence || null,
     };
     frameFiles.push(frameFile);
     onFrame(frameFile, detail);
