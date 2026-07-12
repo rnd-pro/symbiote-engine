@@ -572,29 +572,32 @@ test('local browser screencast provider renders deterministic ranges in parallel
       let workerIndex = launches.length;
       launches.push(options);
       let pageEvents = [];
-      let renderCounts = new Map();
+      let exportCalls = 0;
       let page = {
         mouse: { click: async () => {} },
         async setViewport() {},
         async goto() { pageEvents.push('goto'); },
         async waitForFunction() {},
         async evaluate(_fn, arg) {
-          if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1, layout: 'canonical' };
+          if (arg?.methodParts?.at(-1) === 'exportState') {
+            // Each export returns a distinct opaque continuation snapshot so a
+            // peer that imports the wrong boundary payload is observable.
+            let boundary = exportCalls;
+            exportCalls += 1;
+            pageEvents.push(`export:${boundary}`);
+            return { version: 1, boundary };
+          }
           if (arg?.methodParts?.at(-1) === 'importState') {
-            pageEvents.push('setup-state:import');
+            pageEvents.push(`import:${arg.args?.[0]?.boundary}`);
             return { imported: true };
           }
           if (arg?.frameContext) {
             let frameIndex = arg.frameContext.frameIndex;
-            let renderCount = (renderCounts.get(frameIndex) || 0) + 1;
-            renderCounts.set(frameIndex, renderCount);
-            pageEvents.push(`render:${frameIndex}`);
+            pageEvents.push(arg.frameContext.warmup ? `warmup:${frameIndex}` : `render:${frameIndex}`);
             return {
               presentedTimeMs: arg.frameContext.timeMs,
               projectionId: `fixture:${frameIndex}`,
-              contentDigest: frameIndex === 3 && renderCount > 1
-                ? 'content:3:repeated'
-                : `content:${frameIndex}`,
+              contentDigest: `content:${frameIndex}`,
             };
           }
           if (arg?.settleFrames != null) {
@@ -605,8 +608,9 @@ test('local browser screencast provider renders deterministic ranges in parallel
         },
         async screenshot(options) {
           let frame = Number(options.path.match(/frame-(\d+)/)?.[1]);
-          pageEvents.push(`screenshot:${frame}`);
-          await writeFile(options.path, `frame:${frame}${options.path.includes('.seam-') ? ':proof' : ''}`);
+          let proof = options.path.includes('.seam-');
+          pageEvents.push(`${proof ? 'screenshot-proof' : 'screenshot'}:${frame}`);
+          await writeFile(options.path, `frame:${frame}${proof ? ':proof' : ''}`);
         },
       };
       pages.push(pageEvents);
@@ -661,6 +665,12 @@ test('local browser screencast provider renders deterministic ranges in parallel
   assert.equal(result.capture.seamProofs[0].exactPixelsMatch, false);
   assert.equal(result.capture.seamProofs[0].ssim, 0.9999995);
   assert.match(result.capture.setupStateHash, /^[a-f0-9]{64}$/);
+  assert.equal(result.capture.continuationPrepass.projectedFrames, 3);
+  assert.equal(result.capture.continuationPrepass.continuationHashes.length, 2);
+  assert.deepEqual(
+    result.capture.continuationPrepass.continuationHashes.map((entry) => [entry.workerIndex, entry.startFrame]),
+    [[0, 0], [1, 3]],
+  );
   assert.deepEqual(result.capture.workerRanges.map((range) => [range.startFrame, range.endFrame]), [
     [0, 2],
     [3, 5],
@@ -669,23 +679,91 @@ test('local browser screencast provider renders deterministic ranges in parallel
   assert.equal(progress.at(-1).contiguousFrames, 6);
   assert.equal(progress.at(-1).frame, 6);
   assert.ok(events.some((event) => event.stage === 'capture-worker:start' && event.workerIndex === 1));
+
+  // The leader-only prepass projects frames 0..(range1.start-1) with no
+  // screenshots, exporting the continuation payload right before frame 3.
+  let prepassStart = events.find((event) => event.stage === 'continuation-prepass:start');
+  assert.deepEqual(prepassStart, {
+    stage: 'continuation-prepass:start',
+    ranges: 2,
+    projectedFrames: 3,
+    boundaries: [3],
+  });
+  let prepassExported = events.find((event) => event.stage === 'continuation-prepass:exported');
+  assert.equal(prepassExported.range, 1);
+  assert.equal(prepassExported.workerIndex, 1);
+  assert.equal(prepassExported.boundaryFrame, 3);
+  assert.match(prepassExported.continuationHash, /^[a-f0-9]{64}$/);
+  let prepassDone = events.find((event) => event.stage === 'continuation-prepass:done');
+  assert.equal(prepassDone.projectedFrames, 3);
+  assert.equal(typeof prepassDone.durationMs, 'number');
   assert.deepEqual(
-    events.filter((event) => event.stage === 'capture-worker:warmed').map((event) => event.presentations),
-    [2, 2],
+    prepassDone.continuationHashes.map((entry) => [entry.workerIndex, entry.startFrame]),
+    [[0, 0], [1, 3]],
+  );
+  // Peer boundary hash differs from the range-0 initial hash but matches the
+  // hash the prepass exported for that boundary.
+  assert.notEqual(prepassDone.continuationHashes[0].continuationHash, prepassDone.continuationHashes[1].continuationHash);
+  assert.equal(prepassDone.continuationHashes[1].continuationHash, prepassExported.continuationHash);
+  assert.equal(prepassDone.continuationHashes[0].continuationHash, result.capture.setupStateHash);
+
+  // capture-worker:warmed fires in completion order, so key it by worker.
+  let warmedByWorker = new Map(
+    events.filter((event) => event.stage === 'capture-worker:warmed').map((event) => [event.workerIndex, event]),
+  );
+  assert.equal(warmedByWorker.get(0).presentations, 2);
+  assert.equal(warmedByWorker.get(1).presentations, 0);
+  assert.deepEqual(
+    [warmedByWorker.get(0).warmupFrame, warmedByWorker.get(0).boundaryFrame, warmedByWorker.get(0).elapsedMs, warmedByWorker.get(0).continued],
+    [0, 0, 0, false],
   );
   assert.deepEqual(
-    events.filter((event) => event.stage === 'capture-worker:warmed')
-      .map((event) => [event.warmupFrame, event.boundaryFrame, event.elapsedMs]),
-    [[0, 0, 0], [2, 3, 67]],
+    [warmedByWorker.get(1).warmupFrame, warmedByWorker.get(1).boundaryFrame, warmedByWorker.get(1).elapsedMs, warmedByWorker.get(1).continued],
+    [2, 3, 67, true],
   );
-  assert.equal(pages[0].filter((event) => event === 'render:0').length, 3);
-  assert.equal(pages[1].filter((event) => event === 'render:2').length, 2);
-  assert.equal(pages[1].filter((event) => event === 'render:3').length, 1);
+
+  let leader = pages[0];
+  let peer = pages[1];
+  // Leader: canonical export, canonicalize import, prepass warmup + projection
+  // (frames 0..2) with a boundary export before frame 3, restore import, then
+  // the real range-0 capture, then the range-0/1 seam oracle for the three
+  // boundary proof frames 3..5.
+  assert.deepEqual(leader, [
+    'goto',
+    'export:0',
+    'import:0',
+    'warmup:0', 'settle:0',
+    'warmup:0', 'settle:0',
+    'render:0', 'settle:0',
+    'render:1', 'settle:1',
+    'render:2', 'settle:2',
+    'export:1',
+    'import:0',
+    'warmup:0', 'settle:0',
+    'warmup:0', 'settle:0',
+    'render:0', 'settle:0', 'screenshot:0',
+    'render:1', 'settle:1', 'screenshot:1',
+    'render:2', 'settle:2', 'screenshot:2',
+    'render:3', 'settle:3', 'screenshot-proof:3',
+    'render:4', 'settle:4', 'screenshot-proof:4',
+    'render:5', 'settle:5', 'screenshot-proof:5',
+  ]);
+  // Peer: import its own boundary payload (boundary 1), then capture 3..5 with
+  // no warmup or boundary re-render.
+  assert.deepEqual(peer, [
+    'goto',
+    'import:1',
+    'render:3', 'settle:3', 'screenshot:3',
+    'render:4', 'settle:4', 'screenshot:4',
+    'render:5', 'settle:5', 'screenshot:5',
+  ]);
+  assert.equal(peer.filter((event) => event.startsWith('warmup:')).length, 0);
+  assert.equal(peer.includes('render:2'), false);
   for (let pageEvents of pages) {
-    for (let event of pageEvents.filter((item) => item.startsWith('screenshot:'))) {
+    for (let event of pageEvents.filter((item) => item.startsWith('screenshot'))) {
       let frame = event.split(':')[1];
-      assert.ok(pageEvents.indexOf(`render:${frame}`) < pageEvents.indexOf(event));
-      assert.ok(pageEvents.indexOf(`settle:${frame}`) < pageEvents.indexOf(event));
+      assert.ok(pageEvents.lastIndexOf(`render:${frame}`) < pageEvents.indexOf(event));
+      assert.ok(pageEvents.lastIndexOf(`settle:${frame}`) < pageEvents.indexOf(event));
     }
   }
 });
@@ -996,8 +1074,8 @@ test('render artifact contract keeps omitted seam proof evidence from becoming a
   assert.equal(proof.peerPixelHash, 'b'.repeat(64));
 });
 
-test('parallel deterministic capture bootstraps the predecessor when warmup is disabled', async () => {
-  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-boundary-bootstrap-'));
+test('a continued peer imports its boundary state instead of re-rendering it', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-boundary-continuation-'));
   let workers = [];
   let provider = createLocalBrowserScreencastProvider({
     puppeteer: {
@@ -1011,7 +1089,10 @@ test('parallel deterministic capture bootstraps the predecessor when warmup is d
           async waitForFunction() {},
           async evaluate(_fn, arg) {
             if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1 };
-            if (arg?.methodParts?.at(-1) === 'importState') return { imported: true };
+            if (arg?.methodParts?.at(-1) === 'importState') {
+              calls.push({ type: 'import' });
+              return { imported: true };
+            }
             if (arg?.frameContext) {
               calls.push({
                 type: 'render',
@@ -1020,7 +1101,7 @@ test('parallel deterministic capture bootstraps the predecessor when warmup is d
               });
               return {
                 presentedTimeMs: arg.frameContext.timeMs,
-                projectionId: `bootstrap:${arg.frameContext.frameIndex}`,
+                projectionId: `continuation:${arg.frameContext.frameIndex}`,
                 contentDigest: `content:${arg.frameContext.frameIndex}`,
               };
             }
@@ -1041,7 +1122,7 @@ test('parallel deterministic capture bootstraps the predecessor when warmup is d
   });
 
   await provider.execute({
-    id: 'boundary-bootstrap',
+    id: 'boundary-continuation',
     frameFormat: 'webp',
     artifactKind: 'frame-sequence',
     surface: { url: 'http://example.test/render' },
@@ -1065,14 +1146,277 @@ test('parallel deterministic capture bootstraps the predecessor when warmup is d
     },
   }, { artifactKind: 'frame-sequence', browserProfileRoot: tmp });
 
+  // The continued peer never re-renders its boundary frame 0; it imports the
+  // continuation payload once and only rasters its own frame 1.
   assert.deepEqual(workers[1].filter((call) => call.type === 'render'), [
-    { type: 'render', frame: 0, warmup: true },
     { type: 'render', frame: 1, warmup: false },
   ]);
+  assert.equal(workers[1].filter((call) => call.type === 'import').length, 1);
+  // The caption overlay is still primed for boundary frame 0 without a render.
   assert.deepEqual(workers[1].filter((call) => call.type === 'caption').map((call) => call.text), [
     'Before',
     'Boundary',
   ]);
+  assert.ok(
+    workers[1].findIndex((call) => call.type === 'import')
+      < workers[1].findIndex((call) => call.type === 'caption'),
+  );
+});
+
+test('the prepass hands each peer a distinct boundary payload and restores the leader', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-boundary-distinct-'));
+  let pages = [];
+  let events = [];
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        let workerIndex = pages.length;
+        let calls = [];
+        let exports = 0;
+        let page = {
+          mouse: { click: async () => {} },
+          async setViewport() {},
+          async goto() {},
+          async waitForFunction() {},
+          async evaluate(_fn, arg) {
+            if (arg?.methodParts?.at(-1) === 'exportState') {
+              let boundary = exports;
+              exports += 1;
+              return { version: 1, boundary };
+            }
+            if (arg?.methodParts?.at(-1) === 'importState') {
+              calls.push({ type: 'import', boundary: arg.args?.[0]?.boundary });
+              return { imported: true };
+            }
+            if (arg?.frameContext) {
+              calls.push({
+                type: 'render',
+                frame: arg.frameContext.frameIndex,
+                warmup: arg.frameContext.warmup === true,
+                proofOnly: arg.frameContext.proofOnly === true,
+              });
+              return {
+                presentedTimeMs: arg.frameContext.timeMs,
+                projectionId: `distinct:${arg.frameContext.frameIndex}`,
+                contentDigest: `content:${arg.frameContext.frameIndex}`,
+              };
+            }
+            return { settled: true };
+          },
+          async screenshot(options) {
+            let frame = Number(options.path.match(/frame-(\d+)/)?.[1]);
+            await writeFile(options.path, `frame:${frame}`);
+          },
+        };
+        pages.push({ workerIndex, calls });
+        return { async newPage() { return page; }, async close() {} };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => ({ stderr: 'SSIM All:1.000000' }),
+  });
+
+  let result = await provider.execute({
+    id: 'boundary-distinct',
+    frameFormat: 'webp',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 200, frameCount: 6 },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 3,
+      settleFrames: 0,
+      warmupPresentations: 1,
+      setupState: TEST_SETUP_STATE,
+    },
+  }, {
+    artifactKind: 'frame-sequence',
+    browserProfileRoot: tmp,
+    onStage(event) { events.push(event); },
+  });
+
+  assert.equal(pages.length, 3);
+  assert.deepEqual(result.capture.workerRanges.map((range) => [range.startFrame, range.endFrame]), [
+    [0, 1],
+    [2, 3],
+    [4, 5],
+  ]);
+
+  // The prepass projects frames 0..3 once on the leader and exports a payload
+  // before each of the two mid-video range starts.
+  let prepassStart = events.find((event) => event.stage === 'continuation-prepass:start');
+  assert.deepEqual(prepassStart.boundaries, [2, 4]);
+  assert.equal(prepassStart.projectedFrames, 4);
+  let exported = events.filter((event) => event.stage === 'continuation-prepass:exported');
+  assert.deepEqual(exported.map((event) => [event.range, event.boundaryFrame]), [[1, 2], [2, 4]]);
+  assert.notEqual(exported[0].continuationHash, exported[1].continuationHash);
+
+  // Peers launch concurrently (race) and prior workers also render one seam
+  // oracle frame, so identify each browser by the boundary payload it imported
+  // and by the frames it actually rastered (non-warmup, non-proof renders).
+  let summaries = pages.map(({ calls }) => ({
+    importBoundaries: calls.filter((call) => call.type === 'import').map((call) => call.boundary),
+    captureFrames: calls
+      .filter((call) => call.type === 'render' && !call.warmup && !call.proofOnly)
+      .map((call) => call.frame),
+  }));
+
+  // The leader imports only the canonical initial payload (boundary 0), twice:
+  // once to canonicalize and once to restore after the prepass.
+  let leaderSummary = summaries.find((summary) => summary.importBoundaries.length === 2);
+  assert.deepEqual(leaderSummary.importBoundaries, [0, 0]);
+
+  let peerSummaries = summaries.filter((summary) => summary !== leaderSummary);
+  let peerByBoundary = new Map(peerSummaries.map((summary) => [summary.importBoundaries[0], summary]));
+  // Each peer imports exactly one distinct boundary payload and rasters only its
+  // own range, never re-rendering the boundary frame the payload already covers.
+  assert.deepEqual([...peerByBoundary.keys()].sort(), [1, 2]);
+  assert.equal(peerByBoundary.get(1).importBoundaries.length, 1);
+  assert.equal(peerByBoundary.get(2).importBoundaries.length, 1);
+  assert.deepEqual(peerByBoundary.get(1).captureFrames, [2, 3]);
+  assert.deepEqual(peerByBoundary.get(2).captureFrames, [4, 5]);
+});
+
+test('parallel deterministic capture fails closed when the boundary export is not an object', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-boundary-export-invalid-'));
+  let closed = [];
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        let workerIndex = closed.length;
+        let exportCalls = 0;
+        let page = {
+          mouse: { click: async () => {} },
+          async setViewport() {},
+          async goto() {},
+          async waitForFunction() {},
+          async evaluate(_fn, arg) {
+            // The boundary export (the second exportState call) yields a
+            // non-object payload; the initial canonical export stays valid.
+            if (arg?.methodParts?.at(-1) === 'exportState') {
+              exportCalls += 1;
+              return exportCalls === 1 ? { version: 1 } : null;
+            }
+            if (arg?.methodParts?.at(-1) === 'importState') return { imported: true };
+            if (arg?.frameContext) {
+              return {
+                presentedTimeMs: arg.frameContext.timeMs,
+                projectionId: `invalid:${arg.frameContext.frameIndex}`,
+                contentDigest: `content:${arg.frameContext.frameIndex}`,
+              };
+            }
+            return { settled: true };
+          },
+          async screenshot() {},
+        };
+        return {
+          async newPage() { return page; },
+          async close() { closed.push(workerIndex); },
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => ({ stderr: 'SSIM All:1.000000' }),
+  });
+
+  await assert.rejects(provider.execute({
+    id: 'boundary-export-invalid',
+    frameFormat: 'webp',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 67, frameCount: 2 },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 2,
+      settleFrames: 0,
+      warmupPresentations: 0,
+      setupState: TEST_SETUP_STATE,
+    },
+  }, { artifactKind: 'frame-sequence', browserProfileRoot: tmp }), (error) => (
+    error?.code === 'RENDER_SETUP_STATE_INVALID'
+      && /no object payload/.test(error.message)
+  ));
+  // Only the leader launched before the prepass failed; its browser is closed.
+  assert.deepEqual(closed, [0]);
+});
+
+test('parallel deterministic capture aborts the prepass and closes the leader browser', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-prepass-abort-'));
+  let controller = new AbortController();
+  let closed = 0;
+  let renderCalls = 0;
+  let provider = createLocalBrowserScreencastProvider({
+    puppeteer: {
+      async launch() {
+        let page = {
+          mouse: { click: async () => {} },
+          async setViewport() {},
+          async goto() {},
+          async waitForFunction() {},
+          async evaluate(_fn, arg) {
+            if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1 };
+            if (arg?.methodParts?.at(-1) === 'importState') return { imported: true };
+            if (arg?.frameContext) {
+              renderCalls += 1;
+              // Abort mid-prepass, before the boundary payload is exported.
+              controller.abort(new Error('stop during prepass'));
+              return {
+                presentedTimeMs: arg.frameContext.timeMs,
+                projectionId: `prepass:${arg.frameContext.frameIndex}`,
+                contentDigest: `content:${arg.frameContext.frameIndex}`,
+              };
+            }
+            return { settled: true };
+          },
+          async screenshot() {},
+        };
+        return {
+          async newPage() { return page; },
+          async close() { closed += 1; },
+        };
+      },
+    },
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => ({ stderr: 'SSIM All:1.000000' }),
+  });
+
+  await assert.rejects(provider.execute({
+    id: 'prepass-abort',
+    frameFormat: 'webp',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 134, frameCount: 4 },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 2,
+      settleFrames: 0,
+      warmupPresentations: 0,
+      setupState: TEST_SETUP_STATE,
+    },
+  }, {
+    artifactKind: 'frame-sequence',
+    browserProfileRoot: tmp,
+    signal: controller.signal,
+  }), /stop during prepass/);
+
+  // The leader browser is closed and no peers were launched after the abort.
+  assert.equal(closed, 1);
+  assert.ok(renderCalls >= 1);
 });
 
 test('deterministic capture bounds a hanging browser close and records the timeout', async () => {
@@ -1197,9 +1541,14 @@ test('deterministic worker failure aborts and closes the entire pool', async () 
           async goto() {},
           async waitForFunction() {},
           async evaluate(_fn, arg) {
-            if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1 };
+            if (arg?.methodParts?.at(-1) === 'exportState') return { version: 1, boundary: workerIndex };
             if (arg?.methodParts?.at(-1) === 'importState') return { imported: true };
-            if (arg?.frameContext && workerIndex === 0) throw new Error('render hook failed');
+            // The peer fails during its parallel raster (after the leader-only
+            // prepass has already succeeded), so resource sampling and worker
+            // range metrics are populated before the pool aborts.
+            if (arg?.frameContext && !arg.frameContext.warmup && workerIndex === 1) {
+              throw new Error('render hook failed');
+            }
             if (arg?.frameContext) {
               await new Promise((resolve) => setTimeout(resolve, 20));
               return {

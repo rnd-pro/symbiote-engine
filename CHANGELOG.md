@@ -21,6 +21,17 @@
 - Made parallel deterministic capture fail closed by handing an opaque canonical
   setup state from the leader to peer browsers and verifying content plus
   near-lossless boundary pixels before encoding independently rendered ranges.
+- Replaced the shared initial setup-state handoff with a leader-only, no-raster
+  continuation prepass that reproduces the sequential draw history and exports a
+  distinct opaque continuation payload immediately before each parallel range
+  start, so every capturing worker imports the exact state after the previous
+  frame of its range instead of re-rendering the boundary frame. The leader is
+  restored to the canonical initial payload before it captures range 0, mid-video
+  ranges prime the caption overlay for their boundary frame without a render, and
+  the prepass fails closed with stable error codes on a missing, non-object, or
+  incomplete boundary payload while recording its duration, projected frame count,
+  and per-range continuation hashes in normalized capture evidence and stage
+  telemetry without leaking payloads.
 - Hardened the deterministic worker seam threshold so a requested `seamSsim`
   below the locked exact-browser-pixel minimum (`0.999999`), NaN, or out-of-range
   value fails closed instead of being silently clamped, and rejected malformed or

@@ -852,14 +852,24 @@ async function prepareBrowserWorker({
     emitStage(executionOptions, 'setup:done', { ...detail, actions: setupActions.length });
 
     if (setupStateImport) {
-      emitStage(executionOptions, 'setup-state:import', detail);
+      if (!setupStateImport.payload
+        || typeof setupStateImport.payload !== 'object'
+        || Array.isArray(setupStateImport.payload)) {
+        let error = new Error(
+          `render continuation state import for worker ${range.workerIndex} requires an object payload`,
+        );
+        error.code = 'RENDER_CONTINUATION_PAYLOAD_INVALID';
+        throw error;
+      }
+      let importDetail = { ...detail, boundaryFrame: range.startFrame };
+      emitStage(executionOptions, 'setup-state:import', importDetail);
       await withAbort(callWindowMethod(page, {
         path: setupStateImport.path,
         args: [setupStateImport.payload],
         waitForPromise: true,
         timeoutMs: renderClock.timeoutMs,
       }, log), signal);
-      emitStage(executionOptions, 'setup-state:imported', detail);
+      emitStage(executionOptions, 'setup-state:imported', importDetail);
     }
 
     emitStage(executionOptions, 'fonts:wait', detail);
@@ -1075,9 +1085,13 @@ async function captureBrowserWorker({
     emitStage(executionOptions, 'capture-worker:start', detail);
     let warmupFrame = Math.max(0, range.startFrame - 1);
     let warmupElapsedMs = warmupFrame * frameIntervalMs;
-    let warmupPresentations = range.startFrame > 0
-      ? Math.max(1, renderClock.warmupPresentations)
-      : renderClock.warmupPresentations;
+    // Range 0 renders its warmup presentations from the canonical initial state.
+    // Ranges that start mid-video import an exact continuation payload for the
+    // state after frame startFrame-1, so they must not re-render that frame; they
+    // only prime the caption overlay for the boundary without mutating render
+    // state, keeping the parallel capture's draw history identical to sequential.
+    let continued = range.startFrame > 0;
+    let warmupPresentations = continued ? 0 : renderClock.warmupPresentations;
     for (let presentation = 0; presentation < warmupPresentations; presentation += 1) {
       await callRenderAt(page, renderClock, {
         timeMs: warmupElapsedMs,
@@ -1100,6 +1114,7 @@ async function captureBrowserWorker({
       boundaryFrame: range.startFrame,
       elapsedMs: Math.round(warmupElapsedMs),
       presentations: warmupPresentations,
+      continued,
     });
     for (let frame = range.startFrame; frame <= range.endFrame; frame += 1) {
       assertNotAborted(signal);
@@ -1169,6 +1184,145 @@ async function captureBrowserWorker({
   }
 }
 
+function rangeForFrame(ranges, frame) {
+  for (let range of ranges) {
+    if (frame >= range.startFrame && frame <= range.endFrame) return range;
+  }
+  return ranges[ranges.length - 1];
+}
+
+async function exportContinuationState(page, renderClock, log, signal) {
+  let payload = await withAbort(callWindowMethod(page, {
+    path: renderClock.setupState.exportPath,
+    waitForPromise: true,
+    timeoutMs: renderClock.timeoutMs,
+  }, log), signal);
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    let error = new Error('render setup state export returned no object payload');
+    error.code = 'RENDER_SETUP_STATE_INVALID';
+    throw error;
+  }
+  return payload;
+}
+
+async function importContinuationState(page, renderClock, payload, log, signal) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    let error = new Error('render continuation state import requires an object payload');
+    error.code = 'RENDER_CONTINUATION_PAYLOAD_INVALID';
+    throw error;
+  }
+  await withAbort(callWindowMethod(page, {
+    path: renderClock.setupState.importPath,
+    args: [payload],
+    waitForPromise: true,
+    timeoutMs: renderClock.timeoutMs,
+  }, log), signal);
+}
+
+// Leader-only, no-raster pass that reproduces the sequential draw history and
+// exports one opaque continuation payload immediately before each range start.
+// Every capturing worker then imports the exact state that follows the previous
+// frame of its range instead of re-rendering the boundary frame, so parallel
+// ranges keep the exact draw history a single sequential renderer would produce.
+async function runContinuationPrepass({
+  leaderPage,
+  ranges,
+  renderClock,
+  video,
+  initialPayload,
+  initialHash,
+  signal,
+  executionOptions,
+  log,
+}) {
+  let startedAt = Date.now();
+  let frameIntervalMs = 1000 / video.fps;
+  let lastBoundaryFrame = ranges[ranges.length - 1].startFrame;
+  let payloads = new Array(ranges.length).fill(null);
+  let hashes = new Array(ranges.length).fill('');
+  payloads[0] = initialPayload;
+  hashes[0] = initialHash;
+  emitStage(executionOptions, 'continuation-prepass:start', {
+    ranges: ranges.length,
+    projectedFrames: lastBoundaryFrame,
+    boundaries: ranges.slice(1).map((range) => range.startFrame),
+  });
+  for (let presentation = 0; presentation < renderClock.warmupPresentations; presentation += 1) {
+    await callRenderAt(leaderPage, renderClock, {
+      timeMs: 0,
+      frameIndex: 0,
+      fps: video.fps,
+      durationMs: video.durationMs,
+      workerIndex: ranges[0].workerIndex,
+      range: { startFrame: ranges[0].startFrame, endFrame: ranges[0].endFrame },
+      warmup: true,
+      warmupPresentation: presentation,
+    }, signal);
+  }
+  let nextRangeIndex = 1;
+  let projectedFrames = 0;
+  for (let frame = 0; frame < lastBoundaryFrame; frame += 1) {
+    assertNotAborted(signal);
+    let owningRange = rangeForFrame(ranges, frame);
+    await callRenderAt(leaderPage, renderClock, {
+      timeMs: frame * frameIntervalMs,
+      frameIndex: frame,
+      fps: video.fps,
+      durationMs: video.durationMs,
+      workerIndex: owningRange.workerIndex,
+      range: { startFrame: owningRange.startFrame, endFrame: owningRange.endFrame },
+    }, signal);
+    projectedFrames += 1;
+    if (nextRangeIndex < ranges.length && frame === ranges[nextRangeIndex].startFrame - 1) {
+      let boundaryFrame = ranges[nextRangeIndex].startFrame;
+      let boundaryWorkerIndex = ranges[nextRangeIndex].workerIndex;
+      emitStage(executionOptions, 'continuation-prepass:export', {
+        range: nextRangeIndex,
+        workerIndex: boundaryWorkerIndex,
+        boundaryFrame,
+      });
+      let payload = await exportContinuationState(leaderPage, renderClock, log, signal);
+      let continuationHash = sha256(JSON.stringify(payload));
+      payloads[nextRangeIndex] = payload;
+      hashes[nextRangeIndex] = continuationHash;
+      emitStage(executionOptions, 'continuation-prepass:exported', {
+        range: nextRangeIndex,
+        workerIndex: boundaryWorkerIndex,
+        boundaryFrame,
+        continuationHash,
+      });
+      nextRangeIndex += 1;
+    }
+  }
+  if (nextRangeIndex !== ranges.length) {
+    let error = new Error(
+      `render continuation prepass exported ${nextRangeIndex - 1} of ${ranges.length - 1} boundary payloads`,
+    );
+    error.code = 'RENDER_CONTINUATION_INCOMPLETE';
+    throw error;
+  }
+  let durationMs = Date.now() - startedAt;
+  let continuationHashes = ranges.map((range, index) => ({
+    workerIndex: range.workerIndex,
+    startFrame: range.startFrame,
+    continuationHash: hashes[index],
+  }));
+  emitStage(executionOptions, 'continuation-prepass:done', {
+    ranges: ranges.length,
+    projectedFrames,
+    durationMs,
+    continuationHashes,
+  });
+  return {
+    payloads,
+    evidence: {
+      durationMs,
+      projectedFrames,
+      continuationHashes,
+    },
+  };
+}
+
 async function executeDeterministicCapture({
   puppeteer,
   execFile,
@@ -1209,30 +1363,40 @@ async function executeDeterministicCapture({
       executionOptions,
     });
     activeWorkers.push(leader);
-    let setupStatePayload = null;
     let setupStateHash = '';
+    let continuationPayloads = null;
+    let continuationPrepass = null;
     if (ranges.length > 1) {
       emitStage(executionOptions, 'setup-state:export', { workerIndex: 0 });
-      setupStatePayload = await withAbort(callWindowMethod(leader.page, {
-        path: renderClock.setupState.exportPath,
-        waitForPromise: true,
-        timeoutMs: renderClock.timeoutMs,
-      }, log), pool.controller.signal);
-      if (!setupStatePayload || typeof setupStatePayload !== 'object') {
-        let error = new Error('render setup state export returned no object payload');
-        error.code = 'RENDER_SETUP_STATE_INVALID';
-        throw error;
-      }
-      setupStateHash = sha256(JSON.stringify(setupStatePayload));
+      let initialPayload = await exportContinuationState(
+        leader.page,
+        renderClock,
+        log,
+        pool.controller.signal,
+      );
+      setupStateHash = sha256(JSON.stringify(initialPayload));
       emitStage(executionOptions, 'setup-state:exported', { workerIndex: 0, setupStateHash });
       emitStage(executionOptions, 'setup-state:canonicalize', { workerIndex: 0 });
-      await withAbort(callWindowMethod(leader.page, {
-        path: renderClock.setupState.importPath,
-        args: [setupStatePayload],
-        waitForPromise: true,
-        timeoutMs: renderClock.timeoutMs,
-      }, log), pool.controller.signal);
+      await importContinuationState(leader.page, renderClock, initialPayload, log, pool.controller.signal);
       emitStage(executionOptions, 'setup-state:canonicalized', { workerIndex: 0, setupStateHash });
+      let prepass = await runContinuationPrepass({
+        leaderPage: leader.page,
+        ranges,
+        renderClock,
+        video,
+        initialPayload,
+        initialHash: setupStateHash,
+        signal: pool.controller.signal,
+        executionOptions,
+        log,
+      });
+      continuationPayloads = prepass.payloads;
+      continuationPrepass = prepass.evidence;
+      // The leader drew every projected frame during the prepass, so reset it to
+      // the canonical initial state before it captures range 0 for real.
+      emitStage(executionOptions, 'setup-state:restore', { workerIndex: 0, setupStateHash });
+      await importContinuationState(leader.page, renderClock, initialPayload, log, pool.controller.signal);
+      emitStage(executionOptions, 'setup-state:restored', { workerIndex: 0, setupStateHash });
     }
     let peers = await settleWorkerPool(ranges.slice(1).map((range, offset) => async () => {
       let index = offset + 1;
@@ -1248,7 +1412,7 @@ async function executeDeterministicCapture({
         executionOptions,
         setupStateImport: {
           path: renderClock.setupState.importPath,
-          payload: setupStatePayload,
+          payload: continuationPayloads[index],
         },
       });
       activeWorkers.push(worker);
@@ -1384,6 +1548,7 @@ async function executeDeterministicCapture({
       frameTimeSource: 'page-render-clock',
       frameCaptureType: 'screenshot',
       ...(setupStateHash ? { setupStateHash } : {}),
+      ...(continuationPrepass ? { continuationPrepass } : {}),
       seamProofs,
       workerRanges: workerResults
         .map((result) => result.metric)

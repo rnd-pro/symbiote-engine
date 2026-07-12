@@ -114,6 +114,39 @@ function normalizeRenderCapture(value) {
     String(optionalNonNegativeInteger(workerIndex, `renderArtifact.capture.workerPeakRssBytes.${workerIndex}`) ?? 0),
     optionalNonNegativeNumber(rssBytes, `renderArtifact.capture.workerPeakRssBytes.${workerIndex}`) ?? 0,
   ]));
+  let continuationPrepass;
+  if (capture.continuationPrepass !== undefined) {
+    let prepass = requireObject(capture.continuationPrepass, 'renderArtifact.capture.continuationPrepass');
+    continuationPrepass = {
+      durationMs: optionalNonNegativeNumber(
+        prepass.durationMs,
+        'renderArtifact.capture.continuationPrepass.durationMs',
+      ) ?? 0,
+      projectedFrames: optionalNonNegativeInteger(
+        prepass.projectedFrames,
+        'renderArtifact.capture.continuationPrepass.projectedFrames',
+      ) ?? 0,
+      continuationHashes: (Array.isArray(prepass.continuationHashes) ? prepass.continuationHashes : [])
+        .map((entry, index) => {
+          requireObject(entry, `renderArtifact.capture.continuationPrepass.continuationHashes[${index}]`);
+          let continuationHash = cleanString(entry.continuationHash, '');
+          if (!/^[a-f0-9]{64}$/.test(continuationHash)) {
+            fail(`renderArtifact.capture.continuationPrepass.continuationHashes[${index}].continuationHash`, 'must be a sha256 hash');
+          }
+          return {
+            workerIndex: optionalNonNegativeInteger(
+              entry.workerIndex,
+              `renderArtifact.capture.continuationPrepass.continuationHashes[${index}].workerIndex`,
+            ) ?? index,
+            startFrame: optionalNonNegativeInteger(
+              entry.startFrame,
+              `renderArtifact.capture.continuationPrepass.continuationHashes[${index}].startFrame`,
+            ) ?? 0,
+            continuationHash,
+          };
+        }),
+    };
+  }
   return {
     mode,
     workerCount: positiveInteger(capture.workerCount, 1, 'renderArtifact.capture.workerCount'),
@@ -128,6 +161,7 @@ function normalizeRenderCapture(value) {
     setupStateHash: cleanString(capture.setupStateHash, ''),
     seamProofs,
     workerRanges,
+    ...(continuationPrepass ? { continuationPrepass } : {}),
     ...(resourceSamples.length ? { resourceSamples } : {}),
     ...(capture.peakRssBytes !== undefined ? {
       peakRssBytes: optionalNonNegativeNumber(capture.peakRssBytes, 'renderArtifact.capture.peakRssBytes') ?? 0,
