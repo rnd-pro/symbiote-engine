@@ -650,6 +650,7 @@ test('local browser screencast provider renders deterministic ranges in parallel
 
 test('parallel deterministic capture fails closed when worker seam content differs', async () => {
   let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-seam-mismatch-'));
+  let seamFailureDir = join(tmp, 'seam-failure');
   let launchIndex = 0;
   let provider = createLocalBrowserScreencastProvider({
     puppeteer: {
@@ -699,11 +700,17 @@ test('parallel deterministic capture fails closed when worker seam content diffe
   }, {
     artifactKind: 'frame-sequence',
     browserProfileRoot: tmp,
+    seamFailureDir,
   }), (error) => (
     error?.code === 'RENDER_SEAM_MISMATCH'
       && error?.proof?.contentMatches === false
       && error?.proof?.pixelsMatch === true
+      && error?.proof?.diagnosticFiles?.length === 2
   ));
+  assert.deepEqual((await readdir(seamFailureDir)).sort(), [
+    'frame-00001-worker-0.webp',
+    'frame-00001-worker-1.webp',
+  ]);
 });
 
 test('parallel deterministic capture bootstraps the predecessor when warmup is disabled', async () => {

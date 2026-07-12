@@ -1,6 +1,6 @@
 import { execFile as nodeExecFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -878,9 +878,22 @@ async function verifyWorkerSeams({
       };
       proofs.push(proof);
       if (!contentMatches || !pixelsMatch) {
+        let diagnosticFiles = [];
+        if (executionOptions.seamFailureDir) {
+          await mkdir(executionOptions.seamFailureDir, { recursive: true });
+          for (let [proofIndex, source] of [before.path, after.path].entries()) {
+            let name = `frame-${String(frame).padStart(5, '0')}-worker-${proof.workers[proofIndex]}.${frameExtension}`;
+            await copyFile(source, join(executionOptions.seamFailureDir, name));
+            diagnosticFiles.push(name);
+          }
+        }
         let error = new Error(`render worker seam mismatch at frame ${frame}`);
         error.code = 'RENDER_SEAM_MISMATCH';
-        error.proof = { ...proof, paths: [before.path, after.path] };
+        error.proof = {
+          ...proof,
+          ...(diagnosticFiles.length ? { diagnosticFiles } : {}),
+          paths: [before.path, after.path],
+        };
         throw error;
       }
       await rm(before.path, { force: true });
