@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Added an opt-in timestamp-attributed compositor capture transport for
+  deterministic render jobs. Each `renderAt(frame)` evaluation returns an
+  epoch-millisecond marker from its first presentation animation frame. The
+  engine discards and acknowledges earlier compositor events, accepts the first
+  event at or after that marker, and never advances before attribution succeeds.
+  A host-agnostic injected `compositorCapture` adapter supplies sessions with
+  `sessionId`, `next`, `ack`, and `stop`, keeping browser, CDP, and Playwright
+  imports outside the engine. The transport is explicit opt-in and validates
+  lossless PNG bytes, fixed dimensions, DPR, policy version, timeouts, aborts,
+  and session cleanup without storing frame bytes in evidence. Screenshot
+  capture remains the default with no silent fallback.
 - Added mandatory canonical synthesis-receipt v2 verification for local TTS
   audio, including strict HMAC-bound speaker-probe verdicts, distances and
   thresholds, normalization evidence, request, artifact, voice, language,

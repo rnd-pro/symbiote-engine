@@ -1,6 +1,9 @@
 const RENDER_PROVIDER_KINDS = new Set(['screencast']);
 const RENDER_ARTIFACT_KINDS = new Set(['screencast', 'frame-sequence']);
 const AUDIO_PROVIDER_KINDS = new Set(['browser-tts', 'local-tts', 'local-transcribe']);
+const RENDER_CAPTURE_TRANSPORTS = new Set(['screenshot', 'attributed-compositor']);
+
+export const ATTRIBUTED_COMPOSITOR_POLICY_VERSION = 'attributed-compositor/1';
 
 function fail(path, message) {
   throw new Error(`${path}: ${message}`);
@@ -46,6 +49,124 @@ function normalizeKind(value, supported, fallback, path) {
     fail(path, `unsupported kind "${kind}". Supported: ${[...supported].join(', ')}`);
   }
   return kind;
+}
+
+export function normalizeCaptureTransportKind(value, fallback = 'screenshot') {
+  let transport = cleanString(value, fallback) || fallback;
+  if (!RENDER_CAPTURE_TRANSPORTS.has(transport)) {
+    let error = new Error(
+      `renderClock.transport: unsupported transport "${transport}". `
+      + `Supported: ${[...RENDER_CAPTURE_TRANSPORTS].join(', ')}`,
+    );
+    error.code = 'RENDER_TRANSPORT_UNSUPPORTED';
+    throw error;
+  }
+  return transport;
+}
+
+function normalizeFrameData(value, path) {
+  if (typeof value === 'string') {
+    let text = value.trim();
+    if (!text) fail(path, 'must be non-empty base64 data');
+    return { encoding: 'base64', data: text };
+  }
+  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
+    if (value.byteLength <= 0) fail(path, 'must be a non-empty byte buffer');
+    return { encoding: 'bytes', data: value };
+  }
+  fail(path, 'must be a base64 string or byte buffer');
+}
+
+export function normalizeCompositorFrameEvent(event, expected = {}) {
+  requireObject(event, 'compositorFrameEvent');
+  let sessionId = cleanString(event.sessionId, '');
+  if (!sessionId) fail('compositorFrameEvent.sessionId', 'is required');
+  let timestamp = Number(event.timestamp);
+  if (!Number.isFinite(timestamp) || timestamp < 0) {
+    fail('compositorFrameEvent.timestamp', 'must be a non-negative epoch-millisecond number');
+  }
+  let width = positiveInteger(event.width, undefined, 'compositorFrameEvent.width');
+  let height = positiveInteger(event.height, undefined, 'compositorFrameEvent.height');
+  let devicePixelRatio = positiveNumber(
+    event.devicePixelRatio ?? event.dpr,
+    undefined,
+    'compositorFrameEvent.devicePixelRatio',
+  );
+  let { encoding, data } = normalizeFrameData(event.data ?? event.dataBase64, 'compositorFrameEvent.data');
+  if (expected.width != null && width !== expected.width) {
+    fail('compositorFrameEvent.width', `must equal fixed capture width ${expected.width}`);
+  }
+  if (expected.height != null && height !== expected.height) {
+    fail('compositorFrameEvent.height', `must equal fixed capture height ${expected.height}`);
+  }
+  if (expected.devicePixelRatio != null && devicePixelRatio !== expected.devicePixelRatio) {
+    fail('compositorFrameEvent.devicePixelRatio', `must equal fixed capture dpr ${expected.devicePixelRatio}`);
+  }
+  if (expected.sessionId != null && sessionId !== expected.sessionId) {
+    fail('compositorFrameEvent.sessionId', `must equal session "${expected.sessionId}"`);
+  }
+  return { sessionId, timestamp, width, height, devicePixelRatio, encoding, data };
+}
+
+function normalizeLatencyStat(value, path) {
+  let stat = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    meanMs: optionalNonNegativeNumber(stat.meanMs, `${path}.meanMs`) ?? 0,
+    maxMs: optionalNonNegativeNumber(stat.maxMs, `${path}.maxMs`) ?? 0,
+  };
+}
+
+function normalizeCaptureTransport(value) {
+  if (value === undefined || value === null) return undefined;
+  let transport = requireObject(value, 'renderArtifact.capture.transport');
+  let name = normalizeCaptureTransportKind(transport.name, 'attributed-compositor');
+  let policyVersion = cleanString(transport.policyVersion, '');
+  if (!policyVersion) fail('renderArtifact.capture.transport.policyVersion', 'is required');
+  if (name === 'attributed-compositor' && policyVersion !== ATTRIBUTED_COMPOSITOR_POLICY_VERSION) {
+    fail(
+      'renderArtifact.capture.transport.policyVersion',
+      `must equal "${ATTRIBUTED_COMPOSITOR_POLICY_VERSION}"`,
+    );
+  }
+  return {
+    name,
+    policyVersion,
+    acceptedFrames: optionalNonNegativeInteger(
+      transport.acceptedFrames,
+      'renderArtifact.capture.transport.acceptedFrames',
+    ) ?? 0,
+    discardedFrames: optionalNonNegativeInteger(
+      transport.discardedFrames,
+      'renderArtifact.capture.transport.discardedFrames',
+    ) ?? 0,
+    attributionLatencyMs: normalizeLatencyStat(
+      transport.attributionLatencyMs,
+      'renderArtifact.capture.transport.attributionLatencyMs',
+    ),
+    presentationGapMs: normalizeLatencyStat(
+      transport.presentationGapMs,
+      'renderArtifact.capture.transport.presentationGapMs',
+    ),
+    width: positiveInteger(transport.width, undefined, 'renderArtifact.capture.transport.width'),
+    height: positiveInteger(transport.height, undefined, 'renderArtifact.capture.transport.height'),
+    devicePixelRatio: positiveNumber(
+      transport.devicePixelRatio,
+      undefined,
+      'renderArtifact.capture.transport.devicePixelRatio',
+    ),
+    sessionsStopped: optionalNonNegativeInteger(
+      transport.sessionsStopped,
+      'renderArtifact.capture.transport.sessionsStopped',
+    ) ?? 0,
+    sessionStopTimeouts: optionalNonNegativeInteger(
+      transport.sessionStopTimeouts,
+      'renderArtifact.capture.transport.sessionStopTimeouts',
+    ) ?? 0,
+    sessionStopErrors: optionalNonNegativeInteger(
+      transport.sessionStopErrors,
+      'renderArtifact.capture.transport.sessionStopErrors',
+    ) ?? 0,
+  };
 }
 
 function normalizeRenderCapture(value) {
@@ -147,6 +268,7 @@ function normalizeRenderCapture(value) {
         }),
     };
   }
+  let transport = normalizeCaptureTransport(capture.transport);
   return {
     mode,
     workerCount: positiveInteger(capture.workerCount, 1, 'renderArtifact.capture.workerCount'),
@@ -161,6 +283,7 @@ function normalizeRenderCapture(value) {
     setupStateHash: cleanString(capture.setupStateHash, ''),
     seamProofs,
     workerRanges,
+    ...(transport ? { transport } : {}),
     ...(continuationPrepass ? { continuationPrepass } : {}),
     ...(resourceSamples.length ? { resourceSamples } : {}),
     ...(capture.peakRssBytes !== undefined ? {

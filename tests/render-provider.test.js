@@ -5,8 +5,11 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 
 import {
+  ATTRIBUTED_COMPOSITOR_POLICY_VERSION,
   createRenderProviderRegistry,
   normalizeAudioProviderDescriptor,
+  normalizeCaptureTransportKind,
+  normalizeCompositorFrameEvent,
   normalizeRenderArtifact,
   normalizeRenderProvider,
 } from '../contracts/render-provider.js';
@@ -1954,4 +1957,665 @@ test('local browser screencast provider labels setup action failures', async () 
     /setup action 0 \(waitForWindowPredicate:__maximoTourRender\.ready\) failed: not ready/,
   );
   assert.equal(closed, true);
+});
+
+const ATTRIBUTED_FRAME_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+);
+const ATTRIBUTED_FRAME_PNG_BASE64 = ATTRIBUTED_FRAME_PNG.toString('base64');
+
+function makeAttributedHarness({ frameStale = 1, contentDigestByWorker = false } = {}) {
+  let logs = [];
+  let stopped = [];
+  let launchIndex = 0;
+  let puppeteer = {
+    async launch() {
+      let workerIndex = launchIndex;
+      launchIndex += 1;
+      let log = [];
+      logs[workerIndex] = log;
+      let exportCalls = 0;
+      let page = {
+        __log: log,
+        __workerIndex: workerIndex,
+        mouse: { click: async () => {} },
+        async setViewport() {},
+        async goto() {},
+        async waitForFunction() {},
+        async evaluate(_fn, arg) {
+          if (arg?.methodParts?.at(-1) === 'exportState') {
+            let boundary = exportCalls;
+            exportCalls += 1;
+            return { version: 1, boundary };
+          }
+          if (arg?.methodParts?.at(-1) === 'importState') return { imported: true };
+          if (arg?.frameContext) {
+            if (!arg.frameContext.warmup && !arg.frameContext.proofOnly) {
+              log.push(`render:${arg.frameContext.frameIndex}`);
+            }
+            return {
+              presentedTimeMs: arg.frameContext.timeMs,
+              projectionId: `fixture:${arg.frameContext.frameIndex}`,
+              contentDigest: contentDigestByWorker
+                ? `worker:${workerIndex}`
+                : `content:${arg.frameContext.frameIndex}`,
+              ...(arg.capturePresentationMarker ? {
+                presentationMarker: (arg.frameContext.frameIndex + 1) * 100,
+              } : {}),
+            };
+          }
+          if (arg?.settleFrames != null) return { settled: true };
+          return { supported: false };
+        },
+        async screenshot(options) {
+          await writeFile(options.path, `oracle:${options.path}`);
+        },
+      };
+      return {
+        process: () => ({ pid: 4200 + workerIndex }),
+        async newPage() { return page; },
+        async close() { log.push('close'); },
+      };
+    },
+  };
+  let compositorCapture = {
+    async openSession({ page, sessionId, width, height }) {
+      let log = page.__log;
+      let pending = [];
+      return {
+        sessionId,
+        async next() {
+          let lastRender = log.findLast((entry) => entry.startsWith('render:'));
+          let frameIndex = Number(lastRender.split(':')[1]);
+          let clock = (frameIndex + 1) * 100;
+          if (pending.length === 0) {
+            pending = [];
+            for (let stale = frameStale; stale >= 1; stale -= 1) {
+              pending.push({
+                sessionId,
+                timestamp: clock - stale,
+                width,
+                height,
+                devicePixelRatio: 1,
+                data: ATTRIBUTED_FRAME_PNG_BASE64,
+              });
+            }
+            pending.push({
+              sessionId,
+              timestamp: clock + 1,
+              width,
+              height,
+              devicePixelRatio: 1,
+              data: ATTRIBUTED_FRAME_PNG_BASE64,
+            });
+          }
+          log.push('next');
+          return pending.shift() ?? null;
+        },
+        async ack() {},
+        async stop() { log.push('stop'); stopped.push(sessionId); },
+      };
+    },
+  };
+  return { puppeteer, compositorCapture, logs, stopped };
+}
+
+function attributedJob(overrides = {}) {
+  return {
+    id: 'attributed',
+    frameFormat: 'png',
+    artifactKind: 'frame-sequence',
+    surface: { url: 'http://example.test/render' },
+    video: { width: 320, height: 180, fps: 30, durationMs: 100, frameCount: 3 },
+    setup: [],
+    timeline: [],
+    captions: { enabled: false, cues: [] },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 1,
+      settleFrames: 1,
+      timeoutMs: 1000,
+      transport: 'attributed-compositor',
+    },
+    ...overrides,
+  };
+}
+
+test('render capture transport contract normalizes kinds and rejects unsupported values', () => {
+  assert.equal(normalizeCaptureTransportKind(undefined), 'screenshot');
+  assert.equal(normalizeCaptureTransportKind('attributed-compositor'), 'attributed-compositor');
+  assert.throws(
+    () => normalizeCaptureTransportKind('mjpeg'),
+    (error) => error.code === 'RENDER_TRANSPORT_UNSUPPORTED' && /unsupported transport "mjpeg"/.test(error.message),
+  );
+});
+
+test('compositor frame event contract validates every field and fixed dimensions', () => {
+  let expected = { width: 320, height: 180, devicePixelRatio: 1, sessionId: 'worker-0' };
+  let event = normalizeCompositorFrameEvent({
+    sessionId: 'worker-0',
+    timestamp: 12.5,
+    width: 320,
+    height: 180,
+    devicePixelRatio: 1,
+    data: ATTRIBUTED_FRAME_PNG_BASE64,
+  }, expected);
+  assert.deepEqual(event, {
+    sessionId: 'worker-0',
+    timestamp: 12.5,
+    width: 320,
+    height: 180,
+    devicePixelRatio: 1,
+    encoding: 'base64',
+    data: ATTRIBUTED_FRAME_PNG_BASE64,
+  });
+  let bytes = normalizeCompositorFrameEvent({
+    sessionId: 'worker-0',
+    timestamp: 0,
+    width: 320,
+    height: 180,
+    dpr: 1,
+    data: new Uint8Array([1, 2, 3]),
+  }, expected);
+  assert.equal(bytes.encoding, 'bytes');
+  for (let [patch, pattern] of [
+    [{ sessionId: '' }, /compositorFrameEvent\.sessionId: is required/],
+    [{ timestamp: 'soon' }, /compositorFrameEvent\.timestamp: must be a non-negative epoch-millisecond number/],
+    [{ timestamp: -1 }, /compositorFrameEvent\.timestamp: must be a non-negative epoch-millisecond number/],
+    [{ data: '' }, /compositorFrameEvent\.data: must be non-empty base64 data/],
+    [{ data: 42 }, /compositorFrameEvent\.data: must be a base64 string or byte buffer/],
+    [{ width: 321 }, /compositorFrameEvent\.width: must equal fixed capture width 320/],
+    [{ height: 181 }, /compositorFrameEvent\.height: must equal fixed capture height 180/],
+    [{ devicePixelRatio: 2 }, /compositorFrameEvent\.devicePixelRatio: must equal fixed capture dpr 1/],
+    [{ sessionId: 'worker-9' }, /compositorFrameEvent\.sessionId: must equal session "worker-0"/],
+  ]) {
+    assert.throws(() => normalizeCompositorFrameEvent({
+      sessionId: 'worker-0',
+      timestamp: 5,
+      width: 320,
+      height: 180,
+      devicePixelRatio: 1,
+      data: ATTRIBUTED_FRAME_PNG_BASE64,
+      ...patch,
+    }, expected), pattern);
+  }
+});
+
+test('render artifact contract preserves attributed transport evidence without frame bytes', () => {
+  let normalized = normalizeRenderArtifact({
+    kind: 'frame-sequence',
+    providerId: 'p',
+    frames: 1,
+    fps: 30,
+    durationSec: 1 / 30,
+    width: 320,
+    height: 180,
+    framesDir: '/tmp/frames',
+    frameFiles: [{ path: '/tmp/frames/frame-00000.png' }],
+    source: { url: 'http://example.test/render' },
+    capture: {
+      mode: 'deterministic',
+      workerCount: 2,
+      transport: {
+        name: 'attributed-compositor',
+        policyVersion: ATTRIBUTED_COMPOSITOR_POLICY_VERSION,
+        acceptedFrames: 6,
+        discardedFrames: 4,
+        attributionLatencyMs: { meanMs: 2.5, maxMs: 9 },
+        presentationGapMs: { meanMs: 1, maxMs: 3 },
+        width: 320,
+        height: 180,
+        devicePixelRatio: 1,
+        sessionsStopped: 2,
+        sessionStopTimeouts: 0,
+        sessionStopErrors: 0,
+      },
+    },
+  });
+  assert.deepEqual(normalized.capture.transport, {
+    name: 'attributed-compositor',
+    policyVersion: ATTRIBUTED_COMPOSITOR_POLICY_VERSION,
+    acceptedFrames: 6,
+    discardedFrames: 4,
+    attributionLatencyMs: { meanMs: 2.5, maxMs: 9 },
+    presentationGapMs: { meanMs: 1, maxMs: 3 },
+    width: 320,
+    height: 180,
+    devicePixelRatio: 1,
+    sessionsStopped: 2,
+    sessionStopTimeouts: 0,
+    sessionStopErrors: 0,
+  });
+  assert.throws(
+    () => normalizeRenderArtifact({
+      kind: 'frame-sequence',
+      providerId: 'p',
+      frames: 1,
+      fps: 30,
+      durationSec: 1 / 30,
+      width: 320,
+      height: 180,
+      framesDir: '/tmp/frames',
+      frameFiles: [{ path: '/tmp/frames/frame-00000.png' }],
+      source: { url: 'http://example.test/render' },
+      capture: { mode: 'deterministic', workerCount: 1, transport: { name: 'attributed-compositor' } },
+    }),
+    /renderArtifact\.capture\.transport\.policyVersion: is required/,
+  );
+  assert.throws(
+    () => normalizeRenderArtifact({
+      kind: 'frame-sequence',
+      providerId: 'p',
+      frames: 1,
+      fps: 30,
+      durationSec: 1 / 30,
+      width: 320,
+      height: 180,
+      framesDir: '/tmp/frames',
+      frameFiles: [{ path: '/tmp/frames/frame-00000.png' }],
+      source: { url: 'http://example.test/render' },
+      capture: {
+        mode: 'deterministic',
+        workerCount: 1,
+        transport: { name: 'attributed-compositor', policyVersion: 'attributed-compositor/0' },
+      },
+    }),
+    /renderArtifact\.capture\.transport\.policyVersion: must equal "attributed-compositor\/1"/,
+  );
+});
+
+test('attributed transport is opt-in and rejects unsupported adapter or format with stable codes', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-optin-'));
+  let harness = makeAttributedHarness();
+
+  await assert.rejects(
+    createLocalBrowserScreencastProvider({ puppeteer: harness.puppeteer, cwd: tmp, framesRoot: tmp, execFile: async () => {} })
+      .execute(attributedJob(), { artifactKind: 'frame-sequence', browserProfileRoot: tmp }),
+    (error) => error.code === 'RENDER_COMPOSITOR_ADAPTER_REQUIRED',
+  );
+
+  await assert.rejects(
+    createLocalBrowserScreencastProvider({
+      puppeteer: harness.puppeteer,
+      compositorCapture: harness.compositorCapture,
+      cwd: tmp,
+      framesRoot: tmp,
+      execFile: async () => {},
+    }).execute(attributedJob({ frameFormat: 'webp' }), { artifactKind: 'frame-sequence', browserProfileRoot: tmp }),
+    (error) => error.code === 'RENDER_TRANSPORT_FORMAT_UNSUPPORTED',
+  );
+
+  await assert.rejects(
+    createLocalBrowserScreencastProvider({
+      puppeteer: harness.puppeteer,
+      compositorCapture: harness.compositorCapture,
+      cwd: tmp,
+      framesRoot: tmp,
+      execFile: async () => {},
+    }).execute(attributedJob({
+      renderClock: {
+        mode: 'deterministic',
+        path: '__fixture.renderAt',
+        workerCount: 1,
+        transport: 'mjpeg',
+      },
+    }), { artifactKind: 'frame-sequence', browserProfileRoot: tmp }),
+    (error) => error.code === 'RENDER_TRANSPORT_UNSUPPORTED',
+  );
+});
+
+test('injected compositor adapter stays unused unless the attributed transport is opted in', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-default-'));
+  let harness = makeAttributedHarness();
+  let openCalls = 0;
+  let compositorCapture = {
+    async openSession(args) {
+      openCalls += 1;
+      return harness.compositorCapture.openSession(args);
+    },
+  };
+  let result = await createLocalBrowserScreencastProvider({
+    puppeteer: harness.puppeteer,
+    compositorCapture,
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  }).execute(attributedJob({
+    renderClock: { mode: 'deterministic', path: '__fixture.renderAt', workerCount: 1 },
+  }), { artifactKind: 'frame-sequence', browserProfileRoot: tmp });
+
+  assert.equal(openCalls, 0);
+  assert.equal(result.capture.frameCaptureType, 'screenshot');
+  assert.equal(result.capture.transport, undefined);
+});
+
+test('attributed transport discards stale events and accepts the first frame at or after the marker', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-order-'));
+  let harness = makeAttributedHarness({ frameStale: 2 });
+  let result = await createLocalBrowserScreencastProvider({
+    puppeteer: harness.puppeteer,
+    compositorCapture: harness.compositorCapture,
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  }).execute(attributedJob(), { artifactKind: 'frame-sequence', browserProfileRoot: tmp });
+
+  assert.equal(result.capture.frameCaptureType, 'attributed-compositor');
+  assert.equal(result.capture.transport.name, 'attributed-compositor');
+  assert.equal(result.capture.transport.policyVersion, ATTRIBUTED_COMPOSITOR_POLICY_VERSION);
+  assert.equal(result.capture.transport.acceptedFrames, 3);
+  assert.equal(result.capture.transport.discardedFrames, 6);
+  assert.equal(result.capture.transport.width, 320);
+  assert.equal(result.capture.transport.devicePixelRatio, 1);
+  assert.equal(result.capture.transport.sessionsStopped, 1);
+  assert.equal(result.capture.transport.sessionStopTimeouts, 0);
+  assert.equal(result.capture.transport.sessionStopErrors, 0);
+  assert.deepEqual(result.frameFiles.map((frame) => frame.index), [0, 1, 2]);
+  for (let frame of result.frameFiles) {
+    assert.deepEqual(await readFile(frame.path), ATTRIBUTED_FRAME_PNG);
+  }
+  // Ordered per frame: render, then discard-then-accept; and frame N+1
+  // never renders before frame N's attribution completes.
+  assert.deepEqual(harness.logs[0].slice(0, 12), [
+    'render:0', 'next', 'next', 'next',
+    'render:1', 'next', 'next', 'next',
+    'render:2', 'next', 'next', 'next',
+  ]);
+});
+
+test('attributed transport rejects malformed compositor frames and stops the stream and browser', async () => {
+  let cases = [
+    [{ timestamp: Number.NaN }, /compositorFrameEvent\.timestamp: must be a non-negative epoch-millisecond number/],
+    [{ sessionId: '' }, /compositorFrameEvent\.sessionId: is required/],
+    [{ data: '' }, /compositorFrameEvent\.data: must be non-empty base64 data/],
+    [{ data: Buffer.from('not-png').toString('base64') }, (error) => (
+      error.code === 'RENDER_COMPOSITOR_FRAME_FORMAT_INVALID'
+    )],
+    [{ width: 999 }, /compositorFrameEvent\.width: must equal fixed capture width 320/],
+    [{ devicePixelRatio: 3 }, /compositorFrameEvent\.devicePixelRatio: must equal fixed capture dpr 1/],
+  ];
+  for (let [patch, pattern] of cases) {
+    let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-malformed-'));
+    let stopped = [];
+    let closed = [];
+    let compositorCapture = {
+      async openSession({ page, sessionId, width, height }) {
+        return {
+          sessionId,
+          async next() {
+            return {
+              sessionId,
+              timestamp: 20,
+              width,
+              height,
+              devicePixelRatio: 1,
+              data: ATTRIBUTED_FRAME_PNG_BASE64,
+              ...patch,
+            };
+          },
+          async ack() {},
+          async stop() { stopped.push(sessionId); },
+        };
+      },
+    };
+    let puppeteer = {
+      async launch() {
+        return {
+          async newPage() {
+            return {
+              mouse: { click: async () => {} },
+              async setViewport() {},
+              async goto() {},
+              async waitForFunction() {},
+              async evaluate(_fn, arg) {
+                if (arg?.frameContext) {
+                  return {
+                    presentedTimeMs: arg.frameContext.timeMs,
+                    projectionId: `fixture:${arg.frameContext.frameIndex}`,
+                    contentDigest: `content:${arg.frameContext.frameIndex}`,
+                    presentationMarker: 10,
+                  };
+                }
+                if (arg?.settleFrames != null) return { settled: true };
+                return { supported: false };
+              },
+              async screenshot() {},
+            };
+          },
+          async close() { closed.push(true); },
+        };
+      },
+    };
+    await assert.rejects(
+      createLocalBrowserScreencastProvider({
+        puppeteer,
+        compositorCapture,
+        cwd: tmp,
+        framesRoot: tmp,
+        execFile: async () => {},
+      }).execute(attributedJob(), { artifactKind: 'frame-sequence', browserProfileRoot: tmp }),
+      pattern,
+    );
+    assert.equal(stopped.length, 1);
+    assert.equal(closed.length, 1);
+  }
+});
+
+test('attributed transport times out on a stalled compositor and closes everything', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-timeout-'));
+  let stopped = [];
+  let closed = [];
+  let compositorCapture = {
+    async openSession({ sessionId }) {
+      return {
+        sessionId,
+        next() { return new Promise(() => {}); },
+        async ack() {},
+        async stop() { stopped.push(sessionId); },
+      };
+    },
+  };
+  let puppeteer = {
+    async launch() {
+      return {
+        async newPage() {
+          return {
+            mouse: { click: async () => {} },
+            async setViewport() {},
+            async goto() {},
+            async waitForFunction() {},
+            async evaluate(_fn, arg) {
+              if (arg?.frameContext) {
+                return {
+                  presentedTimeMs: arg.frameContext.timeMs,
+                  projectionId: 'x',
+                  presentationMarker: 1,
+                };
+              }
+              if (arg?.settleFrames != null) return { settled: true };
+              return { supported: false };
+            },
+            async screenshot() {},
+          };
+        },
+        async close() { closed.push(true); },
+      };
+    },
+  };
+  await assert.rejects(
+    createLocalBrowserScreencastProvider({
+      puppeteer,
+      compositorCapture,
+      cwd: tmp,
+      framesRoot: tmp,
+      execFile: async () => {},
+    }).execute(attributedJob({
+      renderClock: {
+        mode: 'deterministic',
+        path: '__fixture.renderAt',
+        workerCount: 1,
+        settleFrames: 0,
+        timeoutMs: 40,
+        transport: 'attributed-compositor',
+      },
+    }), { artifactKind: 'frame-sequence', browserProfileRoot: tmp }),
+    (error) => error.code === 'RENDER_COMPOSITOR_ATTRIBUTION_TIMEOUT',
+  );
+  assert.equal(stopped.length, 1);
+  assert.equal(closed.length, 1);
+});
+
+test('attributed transport records a rejected session stop without claiming successful cleanup', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-stop-error-'));
+  let harness = makeAttributedHarness();
+  let compositorCapture = {
+    async openSession(args) {
+      let session = await harness.compositorCapture.openSession(args);
+      return {
+        ...session,
+        async stop() { throw new Error('stop rejected'); },
+      };
+    },
+  };
+  let result = await createLocalBrowserScreencastProvider({
+    puppeteer: harness.puppeteer,
+    compositorCapture,
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  }).execute(attributedJob(), { artifactKind: 'frame-sequence', browserProfileRoot: tmp });
+
+  assert.equal(result.capture.transport.sessionsStopped, 0);
+  assert.equal(result.capture.transport.sessionStopErrors, 1);
+  assert.equal(result.capture.transport.sessionStopTimeouts, 0);
+  assert.ok(harness.logs[0].includes('close'));
+});
+
+test('attributed transport aborts on signal and closes the stream and browser', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-abort-'));
+  let controller = new AbortController();
+  let harness = makeAttributedHarness();
+  await assert.rejects(
+    createLocalBrowserScreencastProvider({
+      puppeteer: harness.puppeteer,
+      compositorCapture: harness.compositorCapture,
+      cwd: tmp,
+      framesRoot: tmp,
+      execFile: async () => {},
+    }).execute(attributedJob(), {
+      artifactKind: 'frame-sequence',
+      browserProfileRoot: tmp,
+      signal: controller.signal,
+      onStage(event) {
+        if (event.stage === 'capture-worker:start') controller.abort('attributed abort smoke');
+      },
+    }),
+    /attributed abort smoke/,
+  );
+  assert.equal(harness.stopped.length, 1);
+  assert.ok(harness.logs[0].includes('stop'));
+  assert.ok(harness.logs[0].includes('close'));
+});
+
+test('attributed transport renders multi-worker canonical continuation ranges with valid seams', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-workers-'));
+  let harness = makeAttributedHarness();
+  let result = await createLocalBrowserScreencastProvider({
+    puppeteer: harness.puppeteer,
+    compositorCapture: harness.compositorCapture,
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => ({ stderr: 'SSIM All:0.9999995' }),
+  }).execute(attributedJob({
+    video: { width: 320, height: 180, fps: 30, durationMs: 200, frameCount: 6 },
+    renderClock: {
+      mode: 'deterministic',
+      path: '__fixture.renderAt',
+      workerCount: 2,
+      settleFrames: 1,
+      warmupPresentations: 0,
+      timeoutMs: 1000,
+      transport: 'attributed-compositor',
+      setupState: TEST_SETUP_STATE,
+    },
+  }), { artifactKind: 'frame-sequence', browserProfileRoot: tmp });
+
+  assert.equal(result.capture.workerCount, 2);
+  assert.equal(result.capture.frameCaptureType, 'attributed-compositor');
+  assert.deepEqual(result.frameFiles.map((frame) => frame.index), [0, 1, 2, 3, 4, 5]);
+  assert.equal(result.capture.seamProofs.length, 3);
+  assert.equal(result.capture.seamProofs[0].contentMatches, true);
+  assert.equal(result.capture.seamProofs[0].pixelsMatch, true);
+  assert.equal(result.capture.continuationPrepass.continuationHashes.length, 2);
+  assert.equal(result.capture.transport.acceptedFrames, 6);
+  assert.equal(result.capture.transport.sessionsStopped, 2);
+  assert.match(result.capture.setupStateHash, /^[a-f0-9]{64}$/);
+});
+
+test('attributed transport fails closed on a worker seam mismatch and stops every session', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-seam-'));
+  let harness = makeAttributedHarness({ contentDigestByWorker: true });
+  await assert.rejects(
+    createLocalBrowserScreencastProvider({
+      puppeteer: harness.puppeteer,
+      compositorCapture: harness.compositorCapture,
+      cwd: tmp,
+      framesRoot: tmp,
+      execFile: async () => ({ stderr: 'SSIM All:0.9999995' }),
+    }).execute(attributedJob({
+      video: { width: 320, height: 180, fps: 30, durationMs: 67, frameCount: 2 },
+      renderClock: {
+        mode: 'deterministic',
+        path: '__fixture.renderAt',
+        workerCount: 2,
+        settleFrames: 1,
+        warmupPresentations: 0,
+        timeoutMs: 1000,
+        transport: 'attributed-compositor',
+        setupState: TEST_SETUP_STATE,
+      },
+    }), { artifactKind: 'frame-sequence', browserProfileRoot: tmp }),
+    (error) => error.code === 'RENDER_SEAM_MISMATCH',
+  );
+  assert.equal(harness.stopped.length, 2);
+  for (let log of harness.logs) assert.ok(log.includes('stop') && log.includes('close'));
+});
+
+test('attributed transport artifact evidence survives without frame bytes', async () => {
+  let tmp = await mkdtemp(join(os.tmpdir(), 'sym-engine-attributed-evidence-'));
+  let harness = makeAttributedHarness({ frameStale: 2 });
+  let result = await createLocalBrowserScreencastProvider({
+    puppeteer: harness.puppeteer,
+    compositorCapture: harness.compositorCapture,
+    cwd: tmp,
+    framesRoot: tmp,
+    execFile: async () => {},
+  }).execute(attributedJob(), { artifactKind: 'frame-sequence', browserProfileRoot: tmp });
+
+  let transport = result.capture.transport;
+  assert.deepEqual(Object.keys(transport).sort(), [
+    'acceptedFrames',
+    'attributionLatencyMs',
+    'devicePixelRatio',
+    'discardedFrames',
+    'height',
+    'name',
+    'policyVersion',
+    'presentationGapMs',
+    'sessionStopErrors',
+    'sessionStopTimeouts',
+    'sessionsStopped',
+    'width',
+  ]);
+  assert.equal(typeof transport.attributionLatencyMs.meanMs, 'number');
+  assert.equal(typeof transport.presentationGapMs.maxMs, 'number');
+  assert.equal(result.capture.browserCloseTimeouts, 0);
+  let serialized = JSON.stringify(result);
+  assert.equal(serialized.includes(ATTRIBUTED_FRAME_PNG_BASE64), false);
+  for (let frame of result.frameFiles) {
+    assert.equal(Object.hasOwn(frame, 'data'), false);
+    assert.ok(typeof frame.path === 'string');
+  }
 });

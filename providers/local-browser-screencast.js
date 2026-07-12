@@ -5,7 +5,12 @@ import os from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
-import { normalizeRenderArtifact } from '../contracts/render-provider.js';
+import {
+  ATTRIBUTED_COMPOSITOR_POLICY_VERSION,
+  normalizeCaptureTransportKind,
+  normalizeCompositorFrameEvent,
+  normalizeRenderArtifact,
+} from '../contracts/render-provider.js';
 import {
   createRenderFrameCompletionTracker,
   partitionRenderFrameRanges,
@@ -580,10 +585,12 @@ function normalizeRenderClock(job, executionOptions, providerOptions, video) {
     throw error;
   }
   let seamSsim = normalizeSeamSsim(source.seamSsim);
+  let transport = normalizeCaptureTransportKind(source.transport, 'screenshot');
   return {
     mode,
     path,
     workerCount,
+    transport,
     settleFrames: nonNegativeInteger(source.settleFrames, 2, 'renderJob.renderClock.settleFrames', 10),
     warmupPresentations: nonNegativeInteger(
       source.warmupPresentations,
@@ -627,13 +634,26 @@ function withTimeout(promise, timeoutMs, message) {
 async function callRenderAt(page, renderClock, frameContext, signal) {
   let methodParts = cleanPathParts(renderClock.path, 'renderJob.renderClock.path');
   let renderStartedAt = Date.now();
-  let result = await withTimeout(withAbort(page.evaluate(async ({ methodParts: parts, frameContext: context }) => {
+  let result = await withTimeout(withAbort(page.evaluate(async ({
+    methodParts: parts,
+    frameContext: context,
+    capturePresentationMarker,
+  }) => {
     let owner = window;
     for (let index = 0; index < parts.length - 1; index += 1) owner = owner?.[parts[index]];
     let method = owner?.[parts[parts.length - 1]];
     if (typeof method !== 'function') throw new Error(`render clock method not found: ${parts.join('.')}`);
-    return method.call(owner, context);
-  }, { methodParts, frameContext }), signal), renderClock.timeoutMs,
+    let clockState = await method.call(owner, context);
+    if (!capturePresentationMarker) return clockState;
+    let presentationMarker = await new Promise((resolveFrame) => {
+      requestAnimationFrame(() => resolveFrame(performance.timeOrigin + performance.now()));
+    });
+    return { ...clockState, presentationMarker };
+  }, {
+    methodParts,
+    frameContext,
+    capturePresentationMarker: renderClock.transport === 'attributed-compositor',
+  }), signal), renderClock.timeoutMs,
   `render clock ${renderClock.path} timed out at frame ${frameContext.frameIndex}`);
   let renderDurationMs = Date.now() - renderStartedAt;
   let presentedTimeMs = Number(result?.presentedTimeMs);
@@ -643,6 +663,14 @@ async function callRenderAt(page, renderClock, frameContext, signal) {
   let projectionId = cleanString(result?.projectionId, '');
   if (!projectionId) {
     throw new Error(`render clock ${renderClock.path} returned no projectionId at frame ${frameContext.frameIndex}`);
+  }
+  let presentationMarker = Number(result?.presentationMarker);
+  if (renderClock.transport === 'attributed-compositor' && !Number.isFinite(presentationMarker)) {
+    let error = new Error(
+      `render clock ${renderClock.path} returned no presentation marker at frame ${frameContext.frameIndex}`,
+    );
+    error.code = 'RENDER_COMPOSITOR_MARKER_INVALID';
+    throw error;
   }
   let settleDurationMs = 0;
   if (renderClock.settleFrames > 0) {
@@ -666,6 +694,7 @@ async function callRenderAt(page, renderClock, frameContext, signal) {
     contentEvidence: result?.contentEvidence && typeof result.contentEvidence === 'object'
       ? structuredClone(result.contentEvidence)
       : null,
+    ...(renderClock.transport === 'attributed-compositor' ? { presentationMarker } : {}),
     timing: { renderDurationMs, settleDurationMs },
   };
 }
@@ -776,8 +805,174 @@ async function settleWorkerPool(tasks, controller) {
   return settled.map((result) => result.value);
 }
 
+function assertValidCompositorSession(session, workerIndex) {
+  let valid = session
+    && typeof session.next === 'function'
+    && typeof session.ack === 'function'
+    && typeof session.stop === 'function'
+    && cleanString(session.sessionId, '');
+  if (!valid) {
+    let error = new Error(
+      `compositor session for worker ${workerIndex} must expose sessionId and next/ack/stop`,
+    );
+    error.code = 'RENDER_COMPOSITOR_SESSION_INVALID';
+    throw error;
+  }
+}
+
+async function closeCompositorSession(session, executionOptions, detail = {}) {
+  let timeoutMs = Math.max(100, Math.round(
+    Number(executionOptions.compositorStopTimeoutMs ?? executionOptions.browserCloseTimeoutMs) || 5000,
+  ));
+  emitStage(executionOptions, 'compositor:stop', detail);
+  let timer;
+  let stop = Promise.resolve().then(() => session.stop()).then(
+    () => ({ stopped: true, error: false }),
+    () => ({ stopped: false, error: true }),
+  );
+  let result = await Promise.race([
+    stop,
+    new Promise((resolveTimeout) => {
+      timer = setTimeout(() => resolveTimeout({ stopped: false, error: false, timedOut: true }), timeoutMs);
+    }),
+  ]).finally(() => clearTimeout(timer));
+  let outcome = { timedOut: result.timedOut === true, error: result.error === true, timeoutMs };
+  emitStage(executionOptions, 'compositor:stopped', { ...detail, ...outcome });
+  return outcome;
+}
+
+function frameEventBytes(event) {
+  let bytes;
+  if (event.encoding === 'base64') {
+    let normalized = event.data.replace(/\s+/g, '');
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(normalized)) {
+      let error = new Error('compositor frame contains invalid base64 data');
+      error.code = 'RENDER_COMPOSITOR_FRAME_FORMAT_INVALID';
+      throw error;
+    }
+    bytes = Buffer.from(normalized, 'base64');
+  } else {
+    let view = event.data;
+    if (view instanceof ArrayBuffer) bytes = Buffer.from(view);
+    else bytes = Buffer.from(view.buffer, view.byteOffset, view.byteLength);
+  }
+  let pngSignature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (bytes.length < pngSignature.length
+    || pngSignature.some((byte, index) => bytes[index] !== byte)) {
+    let error = new Error('compositor frame is not a lossless PNG');
+    error.code = 'RENDER_COMPOSITOR_FRAME_FORMAT_INVALID';
+    throw error;
+  }
+  return bytes;
+}
+
+function compositorTimeoutError(stage, frameIndex) {
+  let error = new Error(`compositor ${stage} timed out at frame ${frameIndex}`);
+  error.code = 'RENDER_COMPOSITOR_ATTRIBUTION_TIMEOUT';
+  return error;
+}
+
+async function raceCompositorDeadline(promise, timeoutMs, error, signal) {
+  let timer;
+  let timeout = new Promise((_, reject) => { timer = setTimeout(() => reject(error), Math.max(0, timeoutMs)); });
+  try {
+    return await Promise.race([withAbort(Promise.resolve(promise), signal), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// Timestamp-attributed compositor capture: the render clock returns a marker
+// from its first presentation rAF, then
+// consume ordered compositor events, acknowledging and discarding every event
+// stamped before the marker and accepting the first event at or after it. The
+// caller never advances to the next frame until this attribution succeeds.
+async function captureAttributedFrame({
+  prepared,
+  renderClock,
+  video,
+  framePath,
+  frameIndex,
+  presentationMarker,
+  signal,
+}) {
+  let session = prepared.session;
+  let expected = {
+    width: video.width,
+    height: video.height,
+    devicePixelRatio: 1,
+    sessionId: session.sessionId,
+  };
+  let waitStartedAt = Date.now();
+  let deadline = waitStartedAt + renderClock.timeoutMs;
+  let marker = Number(presentationMarker);
+  if (!Number.isFinite(marker)) {
+    throw new Error(`compositor session returned an invalid presentation marker at frame ${frameIndex}`);
+  }
+  let discardedFrames = 0;
+  for (;;) {
+    assertNotAborted(signal);
+    let remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) throw compositorTimeoutError('frame attribution', frameIndex);
+    let raw = await raceCompositorDeadline(
+      session.next({ signal }),
+      remainingMs,
+      compositorTimeoutError('frame attribution', frameIndex),
+      signal,
+    );
+    if (raw === null || raw === undefined) {
+      let error = new Error(`compositor stream ended before frame ${frameIndex} was attributed`);
+      error.code = 'RENDER_COMPOSITOR_STREAM_ENDED';
+      throw error;
+    }
+    let event = normalizeCompositorFrameEvent(raw, expected);
+    await withAbort(Promise.resolve(session.ack(raw)), signal);
+    if (event.timestamp >= marker) {
+      await withAbort(writeFile(framePath, frameEventBytes(event)), signal);
+      return {
+        workerIndex: prepared.range.workerIndex,
+        frame: frameIndex,
+        discardedFrames,
+        presentationGapMs: event.timestamp - marker,
+        attributionLatencyMs: Date.now() - waitStartedAt,
+        devicePixelRatio: event.devicePixelRatio,
+        width: event.width,
+        height: event.height,
+      };
+    }
+    discardedFrames += 1;
+  }
+}
+
+function summarizeMs(values) {
+  if (values.length === 0) return { meanMs: 0, maxMs: 0 };
+  let sum = values.reduce((total, value) => total + value, 0);
+  return {
+    meanMs: Math.round((sum / values.length) * 1000) / 1000,
+    maxMs: Math.max(...values),
+  };
+}
+
+function buildTransportEvidence(samples, video) {
+  return {
+    name: 'attributed-compositor',
+    policyVersion: ATTRIBUTED_COMPOSITOR_POLICY_VERSION,
+    acceptedFrames: samples.length,
+    discardedFrames: samples.reduce((total, sample) => total + sample.discardedFrames, 0),
+    attributionLatencyMs: summarizeMs(samples.map((sample) => sample.attributionLatencyMs)),
+    presentationGapMs: summarizeMs(samples.map((sample) => sample.presentationGapMs)),
+    width: video.width,
+    height: video.height,
+    devicePixelRatio: samples[0]?.devicePixelRatio ?? 1,
+    sessionsStopped: 0,
+    sessionStopTimeouts: 0,
+    sessionStopErrors: 0,
+  };
+}
+
 async function prepareBrowserWorker({
   puppeteer,
+  compositorCapture,
   job,
   video,
   range,
@@ -813,6 +1008,7 @@ async function prepareBrowserWorker({
     if (signal?.aborted) await closeBrowserLaunchAfterAbort(launchPromise, executionOptions, detail);
     throw error;
   }
+  let session = null;
   try {
     emitStage(executionOptions, 'browser:page', detail);
     let page = await withAbort(browser.newPage(), signal);
@@ -881,14 +1077,31 @@ async function prepareBrowserWorker({
       await withAbort(installCaptionOverlay(page), signal);
       emitStage(executionOptions, 'captions-overlay:ready', detail);
     }
+
+    if (renderClock.transport === 'attributed-compositor') {
+      emitStage(executionOptions, 'compositor:open', detail);
+      session = await withAbort(Promise.resolve(compositorCapture.openSession({
+        page,
+        sessionId: `worker-${range.workerIndex}`,
+        width: video.width,
+        height: video.height,
+        devicePixelRatio: 1,
+        timeoutMs: renderClock.timeoutMs,
+        signal,
+      })), signal);
+      assertValidCompositorSession(session, range.workerIndex);
+      emitStage(executionOptions, 'compositor:ready', { ...detail, sessionId: session.sessionId });
+    }
     return {
       browser,
       page,
       range,
       profileDir,
+      session,
       warmupDurationMs: Date.now() - workerStartedAt,
     };
   } catch (error) {
+    if (session) await closeCompositorSession(session, executionOptions, detail).catch(() => {});
     await closeBrowserWorker(browser, executionOptions, detail);
     throw error;
   }
@@ -1067,6 +1280,7 @@ async function captureBrowserWorker({
   let startedAt = Date.now();
   let stateSamples = [];
   let frameFiles = [];
+  let transportSamples = [];
   let phaseDurationMs = {
     render: 0,
     settle: 0,
@@ -1153,11 +1367,23 @@ async function captureBrowserWorker({
 
       let framePath = join(framesDir, `frame-${String(frame).padStart(5, '0')}.${frameExtension}`);
       let screenshotStartedAt = Date.now();
-      await withAbort(page.screenshot({
-        path: framePath,
-        type: frameFormat,
-        fullPage: false,
-      }), signal);
+      if (prepared.session) {
+        transportSamples.push(await captureAttributedFrame({
+          prepared,
+          renderClock,
+          video,
+          framePath,
+          frameIndex: frame,
+          presentationMarker: clockState.presentationMarker,
+          signal,
+        }));
+      } else {
+        await withAbort(page.screenshot({
+          path: framePath,
+          type: frameFormat,
+          fullPage: false,
+        }), signal);
+      }
       phaseDurationMs.screenshot += Date.now() - screenshotStartedAt;
       let frameFile = {
         index: frame,
@@ -1176,6 +1402,7 @@ async function captureBrowserWorker({
     return {
       frameFiles,
       stateSamples,
+      transportSamples,
       metric: workerMetric(),
     };
   } catch (error) {
@@ -1325,6 +1552,7 @@ async function runContinuationPrepass({
 
 async function executeDeterministicCapture({
   puppeteer,
+  compositorCapture,
   execFile,
   ffmpegPath,
   cwd,
@@ -1353,6 +1581,7 @@ async function executeDeterministicCapture({
   try {
     let leader = await prepareBrowserWorker({
       puppeteer,
+      compositorCapture,
       job,
       video,
       range: ranges[0],
@@ -1402,6 +1631,7 @@ async function executeDeterministicCapture({
       let index = offset + 1;
       let worker = await prepareBrowserWorker({
         puppeteer,
+        compositorCapture,
         job,
         video,
         range,
@@ -1546,7 +1776,7 @@ async function executeDeterministicCapture({
         ? Math.round((video.frameCount / (durationMs / 1000)) * 1000) / 1000
         : 0,
       frameTimeSource: 'page-render-clock',
-      frameCaptureType: 'screenshot',
+      frameCaptureType: renderClock.transport === 'attributed-compositor' ? 'attributed-compositor' : 'screenshot',
       ...(setupStateHash ? { setupStateHash } : {}),
       ...(continuationPrepass ? { continuationPrepass } : {}),
       seamProofs,
@@ -1560,13 +1790,32 @@ async function executeDeterministicCapture({
         ...(resourceMeasurement.error ? { resourceSamplingError: resourceMeasurement.error } : {}),
       } : {}),
     };
+    if (renderClock.transport === 'attributed-compositor') {
+      capture.transport = buildTransportEvidence(
+        workerResults.flatMap((result) => result.transportSamples || []),
+        video,
+      );
+    }
     let closeResults = [];
+    let sessionStopResults = [];
     for (let worker of activeWorkers.splice(0)) {
+      if (worker.session) {
+        sessionStopResults.push(await closeCompositorSession(worker.session, executionOptions, {
+          workerIndex: worker.range.workerIndex,
+        }));
+      }
       closeResults.push(await closeBrowserWorker(worker.browser, executionOptions, {
         workerIndex: worker.range.workerIndex,
       }));
     }
     capture.browserCloseTimeouts = closeResults.filter((result) => result.timedOut).length;
+    if (capture.transport) {
+      capture.transport.sessionsStopped = sessionStopResults.filter(
+        (result) => !result.timedOut && !result.error,
+      ).length;
+      capture.transport.sessionStopTimeouts = sessionStopResults.filter((result) => result.timedOut).length;
+      capture.transport.sessionStopErrors = sessionStopResults.filter((result) => result.error).length;
+    }
     emitStage(executionOptions, 'capture:done', {
       frames: video.frameCount,
       workerCount: ranges.length,
@@ -1651,6 +1900,11 @@ async function executeDeterministicCapture({
     return artifact;
   } finally {
     for (let worker of activeWorkers.splice(0)) {
+      if (worker.session) {
+        await closeCompositorSession(worker.session, executionOptions, {
+          workerIndex: worker.range.workerIndex,
+        }).catch(() => {});
+      }
       await closeBrowserWorker(worker.browser, executionOptions, {
         workerIndex: worker.range.workerIndex,
       });
@@ -1660,7 +1914,14 @@ async function executeDeterministicCapture({
 }
 
 export function createLocalBrowserScreencastProvider(options = {}) {
-  let { puppeteer, ffmpegPath = 'ffmpeg', execFile = defaultExecFile, cwd = process.cwd(), framesRoot } = options;
+  let {
+    puppeteer,
+    compositorCapture = null,
+    ffmpegPath = 'ffmpeg',
+    execFile = defaultExecFile,
+    cwd = process.cwd(),
+    framesRoot,
+  } = options;
   if (!puppeteer || typeof puppeteer.launch !== 'function') {
     throw new Error('local-browser-screencast requires injected puppeteer.launch');
   }
@@ -1705,6 +1966,22 @@ export function createLocalBrowserScreencastProvider(options = {}) {
       let frameExtension = frameFormatExtension(frameFormat);
       let framePattern = `frame-%05d.${frameExtension}`;
       let frameMimeType = frameFormatMimeType(frameFormat);
+      if (renderClock.transport === 'attributed-compositor') {
+        if (frameFormat !== 'png') {
+          let error = new Error(
+            `attributed-compositor transport captures lossless png only; got "${frameFormat}"`,
+          );
+          error.code = 'RENDER_TRANSPORT_FORMAT_UNSUPPORTED';
+          throw error;
+        }
+        if (!compositorCapture || typeof compositorCapture.openSession !== 'function') {
+          let error = new Error(
+            'attributed-compositor transport requires an injected compositorCapture.openSession adapter',
+          );
+          error.code = 'RENDER_COMPOSITOR_ADAPTER_REQUIRED';
+          throw error;
+        }
+      }
       emitStage(executionOptions, 'frames:prepare', {
         framesDir,
         frames: video.frameCount,
@@ -1722,6 +1999,7 @@ export function createLocalBrowserScreencastProvider(options = {}) {
       if (renderClock.mode === 'deterministic') {
         return executeDeterministicCapture({
           puppeteer,
+          compositorCapture,
           execFile,
           ffmpegPath,
           cwd,
