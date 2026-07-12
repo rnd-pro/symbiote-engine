@@ -541,6 +541,9 @@ async function callRenderAt(page, renderClock, frameContext, signal) {
     presentedTimeMs,
     projectionId,
     contentDigest: cleanString(result?.contentDigest, ''),
+    contentEvidence: result?.contentEvidence && typeof result.contentEvidence === 'object'
+      ? structuredClone(result.contentEvidence)
+      : null,
   };
 }
 
