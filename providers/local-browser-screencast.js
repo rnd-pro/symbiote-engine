@@ -474,6 +474,12 @@ function normalizeRenderClock(job, executionOptions, providerOptions, video) {
     path,
     workerCount,
     settleFrames: nonNegativeInteger(source.settleFrames, 2, 'renderJob.renderClock.settleFrames', 10),
+    warmupPresentations: nonNegativeInteger(
+      source.warmupPresentations,
+      1,
+      'renderJob.renderClock.warmupPresentations',
+      30,
+    ),
     timeoutMs: Math.round(positiveNumber(source.timeoutMs, 10000, 'renderJob.renderClock.timeoutMs')),
     setupState,
     seamSsim,
@@ -907,15 +913,18 @@ async function captureBrowserWorker({
   let frameFiles = [];
   emitStage(executionOptions, 'capture-worker:start', detail);
   let warmupElapsedMs = range.startFrame * frameIntervalMs;
-  await callRenderAt(page, renderClock, {
-    timeMs: warmupElapsedMs,
-    frameIndex: range.startFrame,
-    fps: video.fps,
-    durationMs: video.durationMs,
-    workerIndex: range.workerIndex,
-    range: { startFrame: range.startFrame, endFrame: range.endFrame },
-    warmup: true,
-  }, signal);
+  for (let presentation = 0; presentation < renderClock.warmupPresentations; presentation += 1) {
+    await callRenderAt(page, renderClock, {
+      timeMs: warmupElapsedMs,
+      frameIndex: range.startFrame,
+      fps: video.fps,
+      durationMs: video.durationMs,
+      workerIndex: range.workerIndex,
+      range: { startFrame: range.startFrame, endFrame: range.endFrame },
+      warmup: true,
+      warmupPresentation: presentation,
+    }, signal);
+  }
   let warmupCaption = captionAt(job.captions, warmupElapsedMs);
   await withAbort(setCaption(page, warmupCaption), signal);
   lastCaptionKey = warmupCaption ? `${warmupCaption.speaker}:${warmupCaption.text}` : '';
@@ -923,6 +932,7 @@ async function captureBrowserWorker({
     ...detail,
     frame: range.startFrame,
     elapsedMs: Math.round(warmupElapsedMs),
+    presentations: renderClock.warmupPresentations,
   });
   for (let frame = range.startFrame; frame <= range.endFrame; frame += 1) {
     assertNotAborted(signal);

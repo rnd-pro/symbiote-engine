@@ -589,6 +589,7 @@ test('local browser screencast provider renders deterministic ranges in parallel
       path: '__fixture.renderAt',
       workerCount: 2,
       settleFrames: 2,
+      warmupPresentations: 2,
       timeoutMs: 1000,
       setupState: TEST_SETUP_STATE,
     },
@@ -620,9 +621,12 @@ test('local browser screencast provider renders deterministic ranges in parallel
   assert.equal(progress.at(-1).contiguousFrames, 6);
   assert.equal(progress.at(-1).frame, 6);
   assert.ok(events.some((event) => event.stage === 'capture-worker:start' && event.workerIndex === 1));
-  assert.equal(events.filter((event) => event.stage === 'capture-worker:warmed').length, 2);
-  assert.equal(pages[0].filter((event) => event === 'render:0').length, 2);
-  assert.equal(pages[1].filter((event) => event === 'render:3').length, 2);
+  assert.deepEqual(
+    events.filter((event) => event.stage === 'capture-worker:warmed').map((event) => event.presentations),
+    [2, 2],
+  );
+  assert.equal(pages[0].filter((event) => event === 'render:0').length, 3);
+  assert.equal(pages[1].filter((event) => event === 'render:3').length, 3);
   for (let pageEvents of pages) {
     for (let event of pageEvents.filter((item) => item.startsWith('screenshot:'))) {
       let frame = event.split(':')[1];
