@@ -230,6 +230,8 @@ test('render artifact contract supports ordered frame-sequence metadata', () => 
       workerCount: 1,
       durationMs: 12,
       throughputFps: 83.333,
+      cleanupOk: true,
+      cleanupErrors: [],
       peakRssBytes: 2048,
       workerPeakRssBytes: { 0: 2048 },
       resourceSamples: [{
@@ -262,6 +264,24 @@ test('render artifact contract supports ordered frame-sequence metadata', () => 
   assert.equal(capture.capture.peakRssBytes, 2048);
   assert.equal(capture.capture.workerPeakRssBytes[0], 2048);
   assert.equal(capture.capture.resourceSamples[0].workers[0].pid, 10);
+  assert.equal(capture.capture.cleanupOk, true);
+  assert.deepEqual(capture.capture.cleanupErrors, []);
+  assert.throws(
+    () => normalizeRenderArtifact({
+      kind: 'frame-sequence',
+      providerId: 'p',
+      frames: 1,
+      fps: 30,
+      durationSec: 1 / 30,
+      width: 320,
+      height: 180,
+      framesDir: '/tmp/frames',
+      frameFiles: [{ path: '/tmp/frames/frame-00000.webp', mimeType: 'image/webp' }],
+      source: { url: 'http://example.test/render' },
+      capture: { mode: 'deterministic', cleanupOk: 'true' },
+    }),
+    /renderArtifact\.capture\.cleanupOk: must be a boolean/,
+  );
 });
 
 test('render provider contract stays browser-safe while local provider stays Node-only', async () => {

@@ -72,11 +72,13 @@ test('render finalize builds frame sequence x264 args with optional audio', () =
 test('render finalize builds reusable caption overlay filters for final video', () => {
   let filter = buildCaptionOverlayFilter({
     captionsPath: "/cache/captions/tour:one.vtt",
-    captionStyle: { preset: 'tiktok', fontSize: 28, marginV: 80 },
+    captionStyle: { preset: 'tiktok', fontSize: 54, marginBottom: 80 },
+    width: 1080,
+    height: 1920,
   });
 
   assert.match(filter, /^subtitles=\/cache\/captions\/tour\\:one\.vtt:force_style='/);
-  assert.match(filter, /Fontsize=28/);
+  assert.match(filter, /Fontsize=54/);
   assert.match(filter, /MarginV=80/);
   assert.equal(buildCaptionOverlayFilter({}), '');
   let assFilter = buildCaptionOverlayFilter({
@@ -85,6 +87,14 @@ test('render finalize builds reusable caption overlay filters for final video', 
   });
   assert.equal(assFilter, 'subtitles=/cache/captions/render.ass');
   assert.doesNotMatch(assFilter, /force_style/);
+  let invalidMarginFilter = buildCaptionOverlayFilter({
+    captionsPath: '/cache/captions/render.vtt',
+    captionStyle: { preset: 'tiktok', marginV: 'invalid' },
+    width: 1080,
+    height: 1920,
+  });
+  assert.doesNotMatch(invalidMarginFilter, /NaN/);
+  assert.match(invalidMarginFilter, /MarginV=288/);
 
   let args = buildFrameSequenceEncodeArgs({
     fps: 12,

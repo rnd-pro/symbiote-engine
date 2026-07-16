@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Preserved explicitly measured capture teardown evidence (`cleanupOk` and
+  `cleanupErrors`) through render-artifact normalization, with strict boolean
+  and string-array validation so downstream proof gates cannot infer cleanup.
+- Added canonical five-word timed caption chunks and adaptive collision-aware
+  caption placement. Live and rendered captions can rewrap into safe side
+  columns with matching ASS anchors while still failing closed when every
+  readable zone is occupied. Narrow safe side columns receive an adaptive
+  six-line budget for canonical five-word, speaker-labelled cues, preserving
+  the configured font size while the normal full-width line limit stays intact.
+  Caption profiles now carry a validated regular/bold weight; conservative
+  weight-aware metrics and a regular-weight vertical preset prevent live and
+  ASS text from being clipped by narrow columns.
 - Added a neutral, versioned Linux-native render provider surface (contracts
   plus pure orchestration primitives; no Docker/Xvfb/Chromium, FFmpeg, GPU, or
   UI implementation). It declares three execution tiers — `sequential-realtime`

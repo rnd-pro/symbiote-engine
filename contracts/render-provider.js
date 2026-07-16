@@ -65,6 +65,12 @@ function optionalNonNegativeInteger(value, path) {
   return number === undefined ? undefined : Math.round(number);
 }
 
+function optionalBoolean(value, path) {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'boolean') fail(path, 'must be a boolean');
+  return value;
+}
+
 function normalizeKind(value, supported, fallback, path) {
   let kind = cleanString(value, fallback);
   if (!supported.has(kind)) {
@@ -291,6 +297,18 @@ function normalizeRenderCapture(value) {
     };
   }
   let transport = normalizeCaptureTransport(capture.transport);
+  let cleanupOk = optionalBoolean(capture.cleanupOk, 'renderArtifact.capture.cleanupOk');
+  let cleanupErrors;
+  if (capture.cleanupErrors !== undefined) {
+    if (!Array.isArray(capture.cleanupErrors)) {
+      fail('renderArtifact.capture.cleanupErrors', 'must be an array');
+    }
+    cleanupErrors = capture.cleanupErrors.map((error, index) => {
+      let message = cleanString(error, '');
+      if (!message) fail(`renderArtifact.capture.cleanupErrors[${index}]`, 'must be a non-empty string');
+      return message;
+    });
+  }
   return {
     mode,
     workerCount: positiveInteger(capture.workerCount, 1, 'renderArtifact.capture.workerCount'),
@@ -315,6 +333,8 @@ function normalizeRenderCapture(value) {
     ...(cleanString(capture.resourceSamplingError, '') ? {
       resourceSamplingError: cleanString(capture.resourceSamplingError, ''),
     } : {}),
+    ...(cleanupOk !== undefined ? { cleanupOk } : {}),
+    ...(cleanupErrors !== undefined ? { cleanupErrors } : {}),
   };
 }
 

@@ -3,16 +3,20 @@ import { test } from 'node:test';
 
 import {
   alignAuthoredCaptionWords,
+  assertCaptionPlacementTrack,
   buildCaptionCues,
+  buildCaptionPlacementTrack,
   captionCueHasWordTimings,
   captionAttributionForRange,
   captionCuesFromClipTranscripts,
+  captionCuesFromTimedWords,
   captionCuesFromTranscript,
   captionTranscriptDurationSec,
   captionWordTimeSeconds,
   overlapMs,
   renderAss,
   renderVtt,
+  resolveCaptionProfile,
 } from '../render-captions.js';
 
 function word(text, startSec, endSec) {
@@ -44,8 +48,8 @@ test('caption transcript cues group by speaker, max words, gaps, and sentence br
   let result = captionCuesFromTranscript(transcript, cues);
 
   assert.deepEqual(result.map((cue) => cue.words.join(' ')), [
-    'one two three four five six seven',
-    'eight',
+    'one two three four five',
+    'six seven eight',
     'gap',
     'ops done.',
     'next',
@@ -88,6 +92,40 @@ test('caption clip transcripts sort across clips and preserve speaker attributio
   assert.deepEqual(result[0].wordTimings.map((item) => item.text), ['first', 'phrase.']);
   assert.equal(result[2].wordTimings[0].startSec, 2);
   assert.equal(result.every((cue) => cue.attributionSource === 'clip-transcript'), true);
+});
+
+test('caption timed words use the canonical readable chunk size and preserve attribution', () => {
+  let result = captionCuesFromTimedWords([
+    word('one', 0, 0.1),
+    word('two', 0.1, 0.2),
+    word('three', 0.2, 0.3),
+    word('four', 0.3, 0.4),
+    word('five', 0.4, 0.5),
+    word('six', 0.5, 0.6),
+  ].map((item) => ({ ...item, speaker: 'guide', cueIndex: 3, timingSource: 'live' })));
+
+  assert.deepEqual(result.map((cue) => cue.words.join(' ')), [
+    'one two three four five',
+    'six',
+  ]);
+  assert.equal(result.every((cue) => cue.speaker === 'guide'), true);
+  assert.equal(result.every((cue) => cue.cueIndex === 3), true);
+  assert.equal(result.every((cue) => cue.attributionSource === 'live'), true);
+  assert.throws(() => captionCuesFromTimedWords([{ text: 'bad', startSec: 1, endSec: 1 }]), /invalid/);
+  assert.throws(() => captionCuesFromTimedWords([], { maxCharacters: 0 }), /maxCharacters/);
+
+  let longWords = 'complete demonstration workspace set: an.'.split(' ').map((text, index) => ({
+    text,
+    startSec: index * 0.1,
+    endSec: (index + 1) * 0.1,
+    speaker: 'guide',
+    cueIndex: 4,
+    timingSource: 'live',
+  }));
+  assert.deepEqual(
+    captionCuesFromTimedWords(longWords).map((cue) => cue.words.join(' ')),
+    ['complete demonstration', 'workspace set: an.'],
+  );
 });
 
 test('authored caption alignment preserves exact Whisper timing when token counts match', () => {
@@ -146,6 +184,7 @@ test('authored caption alignment resamples mismatched tokens without consuming l
 test('caption builds expose authored, fallback, and mixed clip timing sources precisely', () => {
   let authored = buildCaptionCues({
     sequenceMode: 'sequential',
+    presentation: { width: 1080, height: 1920, captionStyle: { preset: 'tiktok' } },
     clipTranscripts: [{
       authoredText: 'UNIAPI routes.',
       speaker: 'guide',
@@ -237,6 +276,7 @@ test('caption helpers expose duration, word time, and caption build source', () 
 
   let built = buildCaptionCues({
     sequenceMode: 'sequential',
+    presentation: { width: 1080, height: 1920, captionStyle: { preset: 'tiktok' } },
     clipTranscripts: [{ speaker: 'guide', words: [word('hello', 0, 0.2)] }],
   });
   assert.equal(built.source, 'whisper+clip-range-map');
@@ -248,6 +288,7 @@ test('caption helpers expose duration, word time, and caption build source', () 
 test('caption build uses timed clip transcripts before transcript text fallbacks', () => {
   let built = buildCaptionCues({
     transcript: { text: 'fallback transcript without timed words', durationSec: 3 },
+    presentation: { width: 1080, height: 1920, captionStyle: { preset: 'tiktok' } },
     clipTranscripts: [
       { speaker: 'guide', cueIndex: 0, words: [word('timed', 1, 1.25), word('clip', 1.3, 1.55)] },
     ],
@@ -261,7 +302,7 @@ test('caption build uses timed clip transcripts before transcript text fallbacks
 });
 
 test('renderAss emits karaoke timings and escapes unsafe text', () => {
-  let ass = renderAss([
+  let placementTrack = buildCaptionPlacementTrack([
     {
       startSec: 1,
       endSec: 2,
@@ -279,13 +320,620 @@ test('renderAss emits karaoke timings and escapes unsafe text', () => {
       words: ['whole line'],
       wordTimings: [],
     },
-  ], { captionStyle: { preset: 'tiktok', fontSize: 30, highlightColor: '#ffff00' } });
+  ], {
+    width: 1080,
+    height: 1920,
+    captionStyle: { preset: 'tiktok', fontSize: 54, highlightColor: '#ffff00' },
+  });
+  let ass = renderAss(placementTrack);
 
-  assert.match(ass, /Style: TikTok,Arial,30/);
+  assert.match(ass, /Style: TikTok,Arial,54/);
+  assert.equal(ass.split('\n').find((line) => line.startsWith('Style: TikTok')).split(',')[7], '0');
   assert.match(ass, /Dialogue: 0,0:00:01\.00,0:00:02\.00,TikTok,guide/);
   assert.match(ass, /\\k25\}A bad/);
   assert.match(ass, /\\k55\}word/);
   assert.match(ass, /Dialogue: 0,0:00:02\.20,0:00:02\.80,TikTok,ops/);
   assert.doesNotMatch(ass, /A\{bad\}/);
-  assert.equal(renderAss([{ startSec: 0, endSec: 1, words: ['plain'], wordTimings: [] }]), '');
+  let plainTrack = buildCaptionPlacementTrack(
+    [{ startSec: 0, endSec: 1, words: ['plain'], wordTimings: [] }],
+    { width: 1920, height: 1080, captionStyle: { preset: 'youtube' } },
+  );
+  let plainAss = renderAss(plainTrack);
+  assert.match(plainAss, /PlayResX: 1920/);
+  assert.match(plainAss, /Dialogue:.*YouTube.*plain/);
+  assert.equal(plainAss.split('\n').find((line) => line.startsWith('Style: YouTube')).split(',')[7], '-1');
+});
+
+test('resolveCaptionProfile resolves format-aware presets and validates/clamps overrides', () => {
+  let profileYt = resolveCaptionProfile({ preset: 'youtube' }, 1920, 1080);
+  assert.equal(profileYt.preset, 'youtube');
+  assert.equal(profileYt.fontName, 'Arial');
+  assert.equal(profileYt.fontWeight, 700);
+  assert.equal(profileYt.fontSize, Math.round(1080 * 0.045));
+  assert.deepEqual(profileYt.preferredZones, ['bottom', 'top']);
+  assert.equal(profileYt.primaryColor, '#FFFFFFFF');
+  assert.equal(profileYt.primaryColorAss, '&H00FFFFFF');
+
+  let profileClamped = resolveCaptionProfile({ preset: 'tiktok', fontSize: 10 }, 1080, 1920);
+  assert.equal(profileClamped.fontSize, 54);
+  assert.equal(profileClamped.fontWeight, 400);
+  assert.equal(resolveCaptionProfile({ preset: 'tiktok', fontWeight: 'bold' }, 1080, 1920).fontWeight, 700);
+  assert.equal(resolveCaptionProfile({ preset: 'tiktok', fontWeight: 500 }, 1080, 1920).fontWeight, 400);
+
+  let profileClampedSmall = resolveCaptionProfile({ preset: 'tiktok', fontSize: 10 }, 1080, 800);
+  assert.equal(profileClampedSmall.fontSize, 22);
+
+  let profileClampedMax = resolveCaptionProfile({ preset: 'tiktok', fontSize: 600 }, 1080, 1920);
+  assert.equal(profileClampedMax.fontSize, Math.round(1920 * 0.12));
+
+  let profileMargins = resolveCaptionProfile({ preset: 'tiktok', margins: { bottom: 800, left: 500 } }, 1080, 1920);
+  assert.equal(profileMargins.margins.bottom, Math.round(1920 * 0.35));
+  assert.equal(profileMargins.margins.left, Math.round(1080 * 0.35));
+
+  let invalidMargins = resolveCaptionProfile({ preset: 'tiktok', marginV: 'invalid', marginH: NaN }, 1080, 1920);
+  assert.deepEqual(invalidMargins.margins, {
+    top: Math.round(1920 * 0.1),
+    bottom: Math.round(1920 * 0.15),
+    left: Math.round(1080 * 0.08),
+    right: Math.round(1080 * 0.08),
+  });
+  assert.equal(Object.values(invalidMargins.margins).every(Number.isFinite), true);
+
+  let profileAssColor = resolveCaptionProfile({ preset: 'tiktok', primaryColor: '&H7A00FF00' }, 1080, 1920);
+  assert.equal(profileAssColor.primaryColor, '#00FF0085');
+});
+
+test('buildCaptionPlacementTrack resolves collision-free zones with safe insets and avoid regions', () => {
+  let cues = [
+    { startSec: 0, endSec: 2, speaker: 'guide', text: 'Hello avoid' }
+  ];
+
+  let avoidRegions = [
+    { x: 0, y: 1500, width: 1080, height: 300, startSec: 0, endSec: 2 }
+  ];
+
+  let result = buildCaptionPlacementTrack(cues, {
+    preset: 'tiktok',
+    width: 1080,
+    height: 1920,
+    avoidRegions
+  });
+
+  assert.equal(result.cues[0].placement.zone, 'top');
+  assert.equal(result.cues[0].placement.alignment, 8);
+  assert.equal(result.cues[0].decisionEvidence.auditTrail.find((candidate) => (
+    candidate.zone === 'bottom' && candidate.horizontal === 'center'
+  ))?.status, 'collided');
+  assert.equal(result.cues[0].decisionEvidence.auditTrail.find((candidate) => (
+    candidate.zone === 'top' && candidate.horizontal === 'center'
+  ))?.status, 'clear');
+});
+
+test('buildCaptionPlacementTrack rewraps into a free side column when attention fills the center', () => {
+  let result = buildCaptionPlacementTrack([{
+    id: 'orientation',
+    startSec: 0,
+    endSec: 2,
+    speaker: 'guide',
+    text: 'Today we will inspect Maximo',
+  }], {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+    avoidRegions: [{
+      id: 'large-focus',
+      x: 192,
+      y: 86,
+      width: 1060,
+      height: 908,
+      startSec: 0,
+      endSec: 2,
+    }],
+  });
+  let cue = result.cues[0];
+
+  assert.equal(cue.placement.zone, 'bottom');
+  assert.equal(cue.placement.horizontal, 'right');
+  assert.equal(cue.placement.alignment, 3);
+  assert.ok(cue.wrappedLines.length <= cue.placement.lineBudget);
+  assert.ok(cue.measuredRect.x >= 1252);
+  assert.ok(cue.decisionEvidence.auditTrail.some((candidate) => (
+    candidate.status === 'clear' && candidate.span?.width > 0
+  )));
+  assert.match(renderAss(result), /\\an3/);
+});
+
+test('buildCaptionPlacementTrack uses a free vertical shelf between persistent controls', () => {
+  let result = buildCaptionPlacementTrack([{
+    id: 'proof-orientation:caption-1',
+    startSec: 0,
+    endSec: 2,
+    speaker: 'guide',
+    text: 'Today we will inspect Maximo',
+  }], {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+    safeInsets: { top: 54, right: 54, bottom: 54, left: 54 },
+    avoidRegions: [
+      { id: 'focus', x: 54, y: 109, width: 1197.406, height: 917, startSec: 0, endSec: 2 },
+      { id: 'annotation', x: 1263.406, y: 109, width: 120, height: 40, startSec: 0, endSec: 2 },
+      { id: 'chrome', x: 0, y: 0, width: 1920, height: 110, startSec: 0, endSec: 2 },
+      { id: 'tour-player', x: 1334.406, y: 590.5, width: 568.594, height: 267.375, startSec: 0, endSec: 2 },
+      { id: 'chat-composer', x: 1318.406, y: 951, width: 600.594, height: 128, startSec: 0, endSec: 2 },
+    ],
+  });
+  let cue = result.cues[0];
+
+  assert.equal(cue.placement.zone, 'bottom');
+  assert.equal(cue.placement.horizontal, 'right');
+  assert.ok(cue.measuredRect.x >= 1257);
+  assert.ok(cue.measuredRect.y >= 110);
+  assert.ok(cue.measuredRect.y + cue.measuredRect.height < 590.5);
+  assert.ok(cue.decisionEvidence.auditTrail.some((candidate) => (
+    candidate.status === 'clear' && Number.isFinite(candidate.adaptiveY)
+  )));
+});
+
+test('bold caption metrics cover Chromium Arial measurements', () => {
+  let result = buildCaptionPlacementTrack([
+    {
+      id: 'clarify-detail',
+      startSec: 0,
+      endSec: 2,
+      speaker: 'ops',
+      text: 'the detail?',
+    },
+    {
+      id: 'conclusion-final',
+      startSec: 2,
+      endSec: 4,
+      speaker: 'ops',
+      text: 'the next task.',
+    },
+  ], {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+  });
+
+  assert.deepEqual(result.cues.map((cue) => cue.wrappedLines), [
+    ['OPS: the detail?'],
+    ['OPS: the next task.'],
+  ]);
+  assert.ok(result.cues[0].measuredRect.width >= 378);
+  assert.ok(result.cues[1].measuredRect.width >= 447);
+});
+
+test('regular caption metrics cover Chromium Arial measurements', () => {
+  let result = buildCaptionPlacementTrack([
+    {
+      id: 'conclusion-final',
+      startSec: 0,
+      endSec: 2,
+      speaker: 'ops',
+      text: 'the next task.',
+    },
+  ], {
+    preset: 'tiktok',
+    width: 1080,
+    height: 1920,
+  });
+
+  assert.deepEqual(result.cues[0].wrappedLines, ['[OPS] the next task.']);
+  assert.ok(result.cues[0].measuredRect.width >= 596);
+});
+
+test('vertical captions adapt their line budget in the safe side column beside tall attention', () => {
+  let result = buildCaptionPlacementTrack([
+    {
+      id: 'proof-orientation:caption-1',
+      startSec: 0,
+      endSec: 2,
+      speaker: 'guide',
+      text: 'Today we will inspect Maximo',
+    },
+    {
+      id: 'proof-explain-map:caption-4',
+      startSec: 2,
+      endSec: 4,
+      speaker: 'guide',
+      text: 'graph, and zoom before opening',
+    },
+    {
+      id: 'proof-orientation:caption-2',
+      startSec: 4,
+      endSec: 6,
+      speaker: 'guide',
+      text: 'interaction proof lesson and verify',
+    },
+    {
+      id: 'proof-clarify-detail:caption-3',
+      startSec: 6,
+      endSec: 8,
+      speaker: 'ops',
+      text: 'the detail?',
+    },
+  ], {
+    preset: 'tiktok',
+    width: 1080,
+    height: 1920,
+    preferredZones: ['bottom', 'top'],
+    safeInsets: { top: 54, right: 54, bottom: 54, left: 54 },
+    avoidRegions: [
+      {
+        id: 'focus',
+        x: 54,
+        y: 109,
+        width: 634.609,
+        height: 1757,
+        startSec: 0,
+        endSec: 8,
+      },
+      {
+        id: 'annotation',
+        x: 700.609,
+        y: 109,
+        width: 120,
+        height: 40,
+        startSec: 0,
+        endSec: 8,
+      },
+    ],
+  });
+  let [orientationCue, mapCue, clippingCue, detailCue] = result.cues;
+
+  assert.equal(result.profile.fontSize, 67);
+  assert.equal(result.profile.fontWeight, 400);
+  assert.equal(result.profile.maxLines, 3);
+  assert.deepEqual(result.cues.map((cue) => cue.placement.zone), ['bottom', 'bottom', 'bottom', 'bottom']);
+  assert.deepEqual(result.cues.map((cue) => cue.placement.horizontal), ['right', 'right', 'right', 'right']);
+  assert.equal(orientationCue.wrappedLines.length, 5);
+  assert.equal(mapCue.wrappedLines.length, 5);
+  assert.deepEqual(clippingCue.wrappedLines, ['[GUIDE]', 'interaction', 'proof', 'lesson', 'and', 'verify']);
+  assert.deepEqual(detailCue.wrappedLines, ['[OPS] the', 'detail?']);
+  assert.equal(orientationCue.placement.lineBudget, 6);
+  assert.equal(mapCue.placement.lineBudget, 6);
+  assert.equal(clippingCue.placement.lineBudget, 6);
+  assert.equal(detailCue.placement.lineBudget, 6);
+  assert.ok(clippingCue.measuredRect.width >= 324);
+  assert.ok(detailCue.measuredRect.width >= 291);
+  assert.ok(clippingCue.measuredRect.width <= clippingCue.placement.wrapWidth);
+  assert.ok(result.cues.every((cue) => cue.measuredRect.x >= 693));
+  assert.ok(result.cues.every((cue) => (
+    cue.decisionEvidence.auditTrail.some((candidate) => candidate.status === 'clear')
+  )));
+});
+
+test('vertical captions preserve long words in the safe side column', () => {
+  let result = buildCaptionPlacementTrack([{
+    id: 'proof-conclusion-final:caption-3',
+    startSec: 61.212,
+    endSec: 62.552,
+    speaker: 'guide',
+    text: 'complete demonstration',
+  }], {
+    preset: 'tiktok',
+    width: 1080,
+    height: 1920,
+    safeInsets: { top: 54, right: 54, bottom: 54, left: 54 },
+    avoidRegions: [
+      {
+        id: 'focus:proof-conclusion-final:0',
+        x: 498,
+        y: 110,
+        width: 528,
+        height: 1756,
+        startSec: 57.652,
+        endSec: 66.722,
+      },
+      {
+        id: 'maximo-app-chrome',
+        kind: 'persistent-chrome',
+        x: 0,
+        y: 0,
+        width: 1080,
+        height: 110,
+        startSec: 0,
+        endSec: 72,
+      },
+    ],
+  });
+  let cue = result.cues[0];
+
+  assert.deepEqual(cue.wrappedLines, ['[GUIDE]', 'complete', 'demonstration']);
+  assert.equal(cue.placement.horizontal, 'left');
+  assert.equal(cue.placement.wrapWidth, 440);
+  assert.equal(cue.measuredRect.x + cue.measuredRect.width <= 494, true);
+  assert.match(renderAss(result), /demonstration/);
+  assert.doesNotMatch(renderAss(result), /demonstratio\\Nn/);
+});
+
+test('caption chunks fit the measured side interval from the rejected Maximo orientation', () => {
+  let text = 'Today we will inspect Maximo interaction proof lesson. By the end: Create a complete demonstration workspace set: an.';
+  let words = text.split(/\s+/u).map((value, index) => ({
+    text: value,
+    startSec: index * 0.25,
+    endSec: (index + 1) * 0.25,
+    speaker: 'guide',
+    cueIndex: 0,
+    timingSource: 'live',
+  }));
+  let cues = captionCuesFromTimedWords(words).map((cue, index) => ({
+    ...cue,
+    id: `proof-orientation:caption-${index + 1}`,
+  }));
+  let result = buildCaptionPlacementTrack(cues, {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+    avoidRegions: [
+      { id: 'focus', x: 54, y: 109, width: 1230.406, height: 917, startSec: 0, endSec: 10 },
+      { id: 'annotation', x: 1296.406, y: 109, width: 120, height: 40, startSec: 0, endSec: 10 },
+    ],
+  });
+
+  assert.deepEqual(cues.map((cue) => cue.words.join(' ')), [
+    'Today we will inspect Maximo',
+    'interaction proof lesson.',
+    'By the end: Create a',
+    'complete demonstration',
+    'workspace set: an.',
+  ]);
+  assert.equal(result.cues.every((cue) => cue.placement.horizontal === 'right'), true);
+  assert.equal(result.cues.every((cue) => cue.wrappedLines.length <= 3), true);
+  assert.equal(result.cues.every((cue) => cue.measuredRect.x >= 1290), true);
+});
+
+test('buildCaptionPlacementTrack throws when no readable collision-free zone exists', () => {
+  let cues = [
+    { startSec: 0, endSec: 2, speaker: 'guide', text: 'No place' }
+  ];
+
+  let avoidRegions = [
+    { x: 0, y: 0, width: 1080, height: 1920, startSec: 0, endSec: 2 }
+  ];
+
+  assert.throws(() => {
+    buildCaptionPlacementTrack(cues, {
+      preset: 'tiktok',
+      width: 1080,
+      height: 1920,
+      avoidRegions
+    });
+  }, /No readable placement zone available/);
+});
+
+test('buildCaptionPlacementTrack preserves maxLines when no side collision narrows the caption', () => {
+  assert.throws(() => buildCaptionPlacementTrack([{
+    startSec: 0,
+    endSec: 2,
+    text: 'one two three four five six seven eight nine ten eleven twelve',
+  }], {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+    maxLines: 2,
+    maxLineWidthPct: 0.1,
+  }), /wrapped lines .* exceeded available line budget \(2\)/);
+});
+
+test('renderAss validates placement track and outputs explicit wrapped lines', () => {
+  let cues = [
+    { startSec: 0, endSec: 2, speaker: 'guide', text: 'This is a long sentence that should wrap' }
+  ];
+
+  let trackResult = buildCaptionPlacementTrack(cues, {
+    preset: 'tiktok',
+    width: 1080,
+    height: 1920,
+    maxLines: 4,
+    maxLineWidthPct: 0.5
+  });
+
+  let ass = renderAss(trackResult);
+  assert.match(ass, /PlayResX: 1080/);
+  assert.match(ass, /PlayResY: 1920/);
+  assert.match(ass, /Dialogue:.*TikTok/);
+  assert.match(ass, /\\pos\(\d+,\d+\).*\\N/);
+});
+
+test('caption presentation requires actual dimensions and rejects unknown presets', () => {
+  assert.throws(() => resolveCaptionProfile({ preset: 'youtube' }), /actual width and height/);
+  assert.throws(
+    () => resolveCaptionProfile({ preset: 'unknown', width: 1920, height: 1080 }),
+    /unsupported caption preset/,
+  );
+  assert.throws(
+    () => buildCaptionPlacementTrack([], { width: 0, height: 1080, preset: 'youtube' }),
+    /actual width and height/,
+  );
+});
+
+test('caption placement carries cue identity, text, timings, and actual profile dimensions', () => {
+  for (let dimensions of [
+    { preset: 'youtube', width: 1920, height: 1080 },
+    { preset: 'tiktok', width: 1080, height: 1920 },
+    { preset: 'square', width: 1080, height: 1080 },
+  ]) {
+    let result = buildCaptionPlacementTrack([{
+      id: 'cue-intro',
+      index: 4,
+      startSec: 1,
+      endSec: 2,
+      speaker: 'guide',
+      text: 'Readable caption',
+      wordTimings: [
+        { text: 'Readable', startSec: 1, endSec: 1.4 },
+        { text: 'caption', startSec: 1.4, endSec: 1.9 },
+      ],
+    }], dimensions);
+    assert.equal(result.schemaVersion, 'caption-presentation-track-v1');
+    assert.equal(result.profile.width, dimensions.width);
+    assert.equal(result.profile.height, dimensions.height);
+    assert.equal(result.cues[0].cueId, 'cue-intro');
+    assert.equal(result.cues[0].cueIndex, 4);
+    assert.equal(result.cues[0].text, 'Readable caption');
+    assert.equal(result.cues[0].wordTimings.length, 2);
+    assert.ok(result.cues[0].measuredRect.width > 0);
+  }
+});
+
+test('caption placement rejects invalid identities, timings, safe areas, and avoid regions', () => {
+  let options = { width: 1920, height: 1080, preset: 'youtube' };
+  assert.throws(() => buildCaptionPlacementTrack([
+    { id: 'same', startSec: 0, endSec: 1, text: 'one' },
+    { id: 'same', startSec: 1, endSec: 2, text: 'two' },
+  ], options), /duplicated/);
+  assert.throws(() => buildCaptionPlacementTrack([
+    { id: 'bad-time', startSec: 2, endSec: 1, text: 'bad' },
+  ], options), /invalid timing/);
+  assert.throws(() => buildCaptionPlacementTrack([], {
+    ...options,
+    safeInsets: { left: 1000, right: 1000 },
+  }), /leave no readable/);
+  assert.throws(() => buildCaptionPlacementTrack([], {
+    ...options,
+    avoidRegions: [{ x: 0, y: 0, width: 10, height: 0 }],
+  }), /positive finite rectangle/);
+});
+
+test('caption placement separates time-overlapping cues and rejects genuinely exhausted zones', () => {
+  let result = buildCaptionPlacementTrack([
+    { id: 'guide', startSec: 0, endSec: 2, speaker: 'guide', text: 'First speaker' },
+    { id: 'learner', startSec: 0.5, endSec: 1.5, speaker: 'learner', text: 'Second speaker' },
+  ], {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+  });
+  let [first, second] = result.cues;
+  let intersects = first.measuredRect.x < second.measuredRect.x + second.measuredRect.width
+    && first.measuredRect.x + first.measuredRect.width > second.measuredRect.x
+    && first.measuredRect.y < second.measuredRect.y + second.measuredRect.height
+    && first.measuredRect.y + first.measuredRect.height > second.measuredRect.y;
+
+  assert.deepEqual(result.cues.map((cue) => cue.placement.zone), ['bottom', 'top']);
+  assert.equal(intersects, false);
+  let bottomOnly = buildCaptionPlacementTrack([
+    { startSec: 0, endSec: 2, speaker: 'guide', text: 'First speaker' },
+    { startSec: 1, endSec: 3, speaker: 'learner', text: 'Second speaker' },
+  ], {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+    preferredZones: ['bottom'],
+  });
+  assert.deepEqual(bottomOnly.cues.map((cue) => cue.placement.zone), ['bottom', 'bottom']);
+  assert.equal(bottomOnly.cues[1].placement.horizontal, 'center');
+  assert.notEqual(bottomOnly.cues[1].measuredRect.y, bottomOnly.cues[0].measuredRect.y);
+  assert.ok(bottomOnly.cues[1].decisionEvidence.auditTrail.some((candidate) => (
+    candidate.status === 'clear' && Number.isFinite(candidate.adaptiveY)
+  )));
+
+  assert.throws(() => buildCaptionPlacementTrack([
+    { startSec: 0, endSec: 1, speaker: 'guide', text: 'First speaker' },
+    { startSec: 1, endSec: 3, speaker: 'learner', text: 'Second speaker' },
+  ], {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+    preferredZones: ['bottom'],
+    avoidRegions: [{ x: 0, y: 0, width: 1920, height: 1080, startSec: 1, endSec: 3 }],
+  }), /No readable placement zone available for cue ID cue-2/);
+});
+
+test('renderAss assigns partial timings only to normalized matching display words', () => {
+  let track = buildCaptionPlacementTrack([{
+    startSec: 0,
+    endSec: 1,
+    speaker: 'guide',
+    text: 'Untimed HELLO, world!',
+    wordTimings: [
+      { text: 'hello', startSec: 0.2, endSec: 0.5 },
+      { text: 'WORLD', startSec: 0.5, endSec: 0.8 },
+    ],
+  }], {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+  });
+
+  let ass = renderAss(track);
+
+  assert.match(ass, /GUIDE: Untimed \{\\k50\}HELLO, \{\\k30\}world!/);
+  assert.doesNotMatch(ass, /\\k\d+\}GUIDE:/);
+  assert.doesNotMatch(ass, /\\k\d+\}Untimed/);
+});
+
+test('caption placement rejects measured text that cannot fit inside the safe bounds', () => {
+  assert.throws(() => buildCaptionPlacementTrack([{
+    startSec: 0,
+    endSec: 1,
+    text: 'WWWW',
+  }], {
+    preset: 'youtube',
+    width: 16,
+    height: 300,
+    maxLines: 10,
+    safeInsets: { top: 0, bottom: 0, left: 2, right: 2 },
+  }), /No readable placement zone available.*outside caption safe bounds/);
+});
+
+test('caption placement validation rejects tampered measured rectangles', () => {
+  let track = buildCaptionPlacementTrack([{
+    startSec: 0,
+    endSec: 1,
+    text: 'Valid geometry',
+  }], {
+    preset: 'youtube',
+    width: 1920,
+    height: 1080,
+  });
+  let zeroWidth = structuredClone(track);
+  zeroWidth.cues[0].measuredRect.width = 0;
+  let outsideSafeBounds = structuredClone(track);
+  outsideSafeBounds.cues[0].measuredRect.x = track.safeInsets.left - 1;
+  let mismatchedAnchor = structuredClone(track);
+  mismatchedAnchor.cues[0].placement.x += 1;
+  let invalidLineBudget = structuredClone(track);
+  invalidLineBudget.cues[0].placement.lineBudget = 0;
+  let staleTypography = structuredClone(track);
+  staleTypography.profile.fontSize = 5000;
+  let staleAvoidEvidence = structuredClone(track);
+  staleAvoidEvidence.avoidRegions.push({
+    id: 'late-attention',
+    kind: 'focus',
+    x: 0,
+    y: 0,
+    width: 1920,
+    height: 1080,
+    startSec: 0,
+    endSec: 1,
+  });
+
+  assert.throws(
+    () => assertCaptionPlacementTrack(zeroWidth),
+    /cue "cue-1" has an invalid measured rectangle/,
+  );
+  assert.throws(
+    () => assertCaptionPlacementTrack(outsideSafeBounds),
+    /cue "cue-1" measured rectangle is outside caption safe bounds/,
+  );
+  assert.throws(
+    () => assertCaptionPlacementTrack(mismatchedAnchor),
+    /cue "cue-1" placement does not match its measured rectangle/,
+  );
+  assert.throws(
+    () => assertCaptionPlacementTrack(invalidLineBudget),
+    /cue "cue-1" has an invalid line budget/,
+  );
+  assert.throws(
+    () => assertCaptionPlacementTrack(staleTypography),
+    /cannot be reproduced from its evidence|does not match its resolved presentation evidence/,
+  );
+  assert.throws(
+    () => assertCaptionPlacementTrack(staleAvoidEvidence),
+    /cannot be reproduced from its evidence|does not match its resolved presentation evidence/,
+  );
 });

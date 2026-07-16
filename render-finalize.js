@@ -1,5 +1,5 @@
 import { cleanString, finiteNonNegativeNumber, finitePositiveNumber, isObject } from './render-utils.js';
-import { resolveCaptionStyle } from './render-captions.js';
+import { resolveCaptionProfile } from './render-captions.js';
 
 function compact(value) {
   if (Array.isArray(value)) {
@@ -44,18 +44,22 @@ export function buildCaptionOverlayFilter(options = {}) {
   let captionsPath = rawPath(options.captionsPath || options.path);
   if (!captionsPath) return '';
   if (/\.ass$/i.test(captionsPath)) return `subtitles=${escapeFfmpegFilterValue(captionsPath)}`;
-  let style = resolveCaptionStyle(isObject(options.captionStyle) ? options.captionStyle : { preset: options.preset });
+  let style = resolveCaptionProfile(
+    isObject(options.captionStyle) ? options.captionStyle : { preset: options.preset },
+    options.width,
+    options.height
+  );
   let forceStyle = [
     `Fontname=${style.fontName}`,
-    `Fontsize=${Math.round(finitePositiveNumber(style.fontSize, 24))}`,
-    `PrimaryColour=${style.primaryColor}`,
-    `OutlineColour=${style.outlineColor}`,
-    `BackColour=${style.backColor}`,
+    `Fontsize=${style.fontSize}`,
+    `PrimaryColour=${style.primaryColorAss}`,
+    `OutlineColour=${style.outlineColorAss}`,
+    `BackColour=${style.backColorAss}`,
     'BorderStyle=3',
     'Outline=1',
     'Shadow=1',
     'Alignment=2',
-    `MarginV=${Math.round(finiteNonNegativeNumber(style.marginV, 70))}`,
+    `MarginV=${style.margins.bottom}`,
     'Bold=1',
   ].join(',');
   return `subtitles=${escapeFfmpegFilterValue(captionsPath)}:force_style='${escapeFfmpegFilterValue(forceStyle)}'`;
@@ -137,7 +141,7 @@ export function buildFrameSequenceEncodeArgs(options = {}) {
   }
   let filters = [
     resolvedScaleFilter,
-    buildCaptionOverlayFilter({ captionsPath: captionsBurnPath || captionsPath, captionStyle }),
+    buildCaptionOverlayFilter({ captionsPath: captionsBurnPath || captionsPath, captionStyle, width: safeWidth, height: safeHeight }),
   ].filter(Boolean);
   if (filters.length) args.push('-vf', filters.join(','));
   args.push('-fps_mode', 'cfr', '-r', String(Math.max(1, Number(fps) || 1)));

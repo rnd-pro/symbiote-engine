@@ -134,13 +134,16 @@ export {
   captionAttributionForRange,
   captionCueHasWordTimings,
   captionCuesFromClipTranscripts,
+  captionCuesFromTimedWords,
   captionCuesFromTranscript,
   captionTranscriptDurationSec,
   captionWordTimeSeconds,
   overlapMs,
+  assertCaptionPlacementTrack,
+  buildCaptionPlacementTrack,
   renderAss,
   renderVtt,
-  resolveCaptionStyle,
+  resolveCaptionProfile,
 } from './render-captions.js';
 export {
   RENDER_PROOF_MANIFEST_STATE_FIELDS,
