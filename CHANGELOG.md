@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 0.3.0-alpha.13
+
+- Retain an active caption slot until its measured rectangle actually intersects an attention region; placement search still keeps a small visual gap after a forced move.
+- Reflow reused slots that no longer fit, validate continuity controls before output, and preserve adjacent source cue identities through VTT generation.
+- Exported `CAPTION_PRESENTATION_TRACK_VERSION` for the canonical v2 contract and
+  made `cueId` an explicit, nonempty requirement; legacy `id`, `index`, and
+  synthesized identities no longer satisfy caption placement or range
+  attribution.
+- Preserved cue indexes, scene-boundary/reset/discontinuity evidence, and the
+  configured continuity gap when v2 placement tracks are shifted and rebuilt.
+- Upgraded the public caption placement track contract to `caption-presentation-track-v2`.
+- Corrected proof metrics: `hardCollisionCount` and `safeBoundsViolationCount` now count only unresolved final defects (which are zero for successfully placed tracks).
+- Added `forcedCollisionRelocationCount` and `forcedSafeBoundsRelocationCount` to count successfully resolved relocations.
+- Fixed `unforcedSwitchCount` to not increment during allowed discontinuity resets.
+- Fixed `pingPongCount` to describe actual output A-B-A transitions and report zero on successful tracks.
+- Persisted `continuityGapMs` in the track contract and preserved explicit cue scene/discontinuity/reset evidence (`sceneBoundary`/`discontinuity`/`resetContinuity` flags) to ensure exact canonical reconstruction.
+- Standardized exact anchor definition (alignment, x, y, wrap width, line budget, and font size) to allow reuse while preventing forced relocation for line budget or metric overflow unless they violate safe bounds or collide.
+- Updated WebVTT generation to emit canonical `cueId` as the WebVTT cue identifier and added uniqueness validation.
 - Preserved explicitly measured capture teardown evidence (`cleanupOk` and
   `cleanupErrors`) through render-artifact normalization, with strict boolean
   and string-array validation so downstream proof gates cannot infer cleanup.

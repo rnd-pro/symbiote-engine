@@ -1,5 +1,7 @@
 import { cleanString, finiteNonNegativeNumber } from './render-utils.js';
 
+export const CAPTION_PRESENTATION_TRACK_VERSION = 'caption-presentation-track-v2';
+
 const CAPTION_LONG_PAUSE_SEC = 0.75;
 const CAPTION_ALIGNMENT_WARNING_RATIO = 0.35;
 const CAPTION_MAX_WORDS = 5;
@@ -9,6 +11,7 @@ const CAPTION_REGULAR_METRIC_SCALE = 1.18;
 const CAPTION_BOLD_METRIC_SCALE = 1.25;
 const CAPTION_LINE_SAFETY_EM = 0.4;
 const CAPTION_COLLISION_GAP_EM = 0.06;
+const CAPTION_CONTINUITY_FLAGS = ['sceneBoundary', 'resetContinuity', 'discontinuity'];
 
 export function captionWordTimeSeconds(word = {}, key, fallback = 0) {
   let value = word[`${key}Sec`] ?? word[key] ?? fallback;
@@ -25,6 +28,8 @@ export function captionAttributionForRange(startSec, endSec, cues = []) {
   let endMs = Math.max(startMs + 1, Number(endSec || startSec || 0) * 1000);
   let best = null;
   for (let cue of Array.isArray(cues) ? cues : []) {
+    let cueId = typeof cue?.cueId === 'string' ? cue.cueId : '';
+    if (!cleanString(cueId, '')) continue;
     let cueStartMs = finiteNonNegativeNumber(cue?.startMs, null);
     let cueEndMs = finiteNonNegativeNumber(cue?.endMs, null);
     if (cueStartMs === null || cueEndMs === null) continue;
@@ -33,12 +38,13 @@ export function captionAttributionForRange(startSec, endSec, cues = []) {
       best = {
         speaker: cleanString(cue?.speaker, ''),
         cueIndex: Number.isFinite(Number(cue?.index)) ? Number(cue.index) : null,
+        cueId,
         overlapMs: overlap,
       };
     }
   }
-  if (best?.overlapMs > 0 && best.speaker) return { ...best, source: 'range-map' };
-  return { speaker: '', cueIndex: null, overlapMs: 0, source: 'unmapped' };
+  if (best?.overlapMs > 0) return { ...best, source: 'range-map' };
+  return { speaker: '', cueIndex: null, cueId: '', overlapMs: 0, source: 'unmapped' };
 }
 
 function formatVttTimestamp(seconds) {
@@ -572,8 +578,48 @@ export function captionCueHasWordTimings(cue = {}) {
   return Array.isArray(cue.wordTimings) && cue.wordTimings.length > 0;
 }
 
+function slotsEqual(s1, s2) {
+  if (!s1 || !s2) return false;
+  return s1.alignment === s2.alignment
+    && s1.x === s2.x
+    && s1.y === s2.y
+    && s1.wrapWidth === s2.wrapWidth
+    && s1.lineBudget === s2.lineBudget
+    && s1.fontSize === s2.fontSize;
+}
+
+function captionContinuityEvidence(cue, label) {
+  let evidence = {};
+  for (let key of CAPTION_CONTINUITY_FLAGS) {
+    if (cue?.[key] === undefined) continue;
+    if (typeof cue[key] !== 'boolean') {
+      throw new TypeError(`${label} has an invalid ${key} flag`);
+    }
+    evidence[key] = cue[key];
+  }
+  return evidence;
+}
+
+function resetsCaptionContinuity(cue) {
+  return CAPTION_CONTINUITY_FLAGS.some((key) => cue?.[key] === true);
+}
+
+function explicitCaptionCueId(cue, index, label) {
+  if (typeof cue?.cueId !== 'string' || !cleanString(cue.cueId, '')) {
+    throw new TypeError(`${label} ${index} requires a nonempty explicit cueId`);
+  }
+  return cue.cueId;
+}
+
 export function buildCaptionPlacementTrack(cues = [], options = {}) {
   if (!Array.isArray(cues)) throw new TypeError('caption cues must be an array');
+  if (options.discontinuity !== undefined) {
+    throw new TypeError('caption discontinuity must be declared on the cue');
+  }
+  let continuityGapMs = options.continuityGapMs ?? 750;
+  if (!Number.isInteger(continuityGapMs) || continuityGapMs <= 0) {
+    throw new TypeError('continuityGapMs must be a positive integer');
+  }
   let w = Number(options.width ?? options.outputWidth ?? options.videoWidth ?? options.playResX);
   let h = Number(options.height ?? options.outputHeight ?? options.videoHeight ?? options.playResY);
   let profile = resolveCaptionProfile(options.captionStyle || options.style || options, w, h);
@@ -599,7 +645,17 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
   let outputBounds = { x: 0, y: 0, width: w, height: h };
   let safeBounds = safeCaptionBounds(w, h, safeInsets);
 
+  let avoidIds = new Set();
   let avoidRegions = (Array.isArray(options.avoidRegions) ? options.avoidRegions : []).map((region, index) => {
+    let id = region?.id !== undefined ? cleanString(region.id, '') : '';
+    if (!id) {
+      throw new TypeError(`avoidRegions[${index}] has a missing or empty ID`);
+    }
+    if (avoidIds.has(id)) {
+      throw new TypeError(`duplicate avoid-region ID "${id}"`);
+    }
+    avoidIds.add(id);
+
     let x = Number(region?.x ?? region?.left);
     let y = Number(region?.y ?? region?.top);
     let width = Number(region?.width);
@@ -620,7 +676,7 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
       }
     }
     return {
-      id: cleanString(region?.id, `avoid-${index + 1}`),
+      id,
       kind: cleanString(region?.kind, 'attention'),
       x,
       y,
@@ -632,9 +688,19 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
   let track = [];
   let cueIds = new Set();
 
+  let activeSlot = null;
+  let usedSlotsInSequence = [];
+
+  let relocationCount = 0;
+  let unforcedSwitchCount = 0;
+  let hardCollisionCount = 0;
+  let safeBoundsViolationCount = 0;
+  let forcedCollisionRelocationCount = 0;
+  let forcedSafeBoundsRelocationCount = 0;
+
   for (let index = 0; index < cues.length; index++) {
     let cue = cues[index];
-    let cueId = cleanString(cue?.id ?? cue?.cueId ?? cue?.index, `cue-${index + 1}`);
+    let cueId = explicitCaptionCueId(cue, index, 'caption cue');
     if (cueIds.has(cueId)) throw new TypeError(`caption cue ID "${cueId}" is duplicated`);
     cueIds.add(cueId);
     let cueStartSec = Number(cue?.startSec ?? cue?.start);
@@ -644,6 +710,7 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
       throw new TypeError(`caption cue "${cueId}" has invalid timing`);
     }
     let cueSpeaker = cleanString(cue.speaker, '');
+    let continuityEvidence = captionContinuityEvidence(cue, `caption cue "${cueId}"`);
 
     let text = cueText(cue);
     if (!text) throw new TypeError(`caption cue "${cueId}" has no text`);
@@ -662,6 +729,7 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
     let selectedLineBudget = null;
     let selectedFontSize = null;
     let selectedLineHeight = null;
+    let selectedCandidateY = null;
     let auditTrail = [];
 
     let activeAvoids = avoidRegions.filter(region => {
@@ -778,10 +846,10 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
         height: measuredHeight,
       };
       let collided = collisionRegions.filter((region) => rectsOverlap(candidateRect, {
-        x: region.x ?? 0,
-        y: region.y ?? 0,
-        width: region.width ?? 0,
-        height: region.height ?? 0,
+        x: (region.x ?? 0) - collisionGap,
+        y: (region.y ?? 0) - collisionGap,
+        width: (region.width ?? 0) + collisionGap * 2,
+        height: (region.height ?? 0) + collisionGap * 2,
       }));
       let insideOutput = rectWithinBounds(candidateRect, outputBounds);
       let insideSafeBounds = rectWithinBounds(candidateRect, safeBounds);
@@ -807,6 +875,65 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
         status,
         metricOverflow,
         collidedRegionIds: collided.map((region) => region.id),
+        insideOutput,
+        insideSafeBounds,
+      };
+    };
+
+    let evaluateSlot = (slot) => {
+      let fontSize = slot.fontSize;
+      let lineBudget = slot.lineBudget;
+      let lineHeight = Math.round(fontSize * 1.3);
+      let wrappedLines = wrapText(words, slot.wrapWidth, fontSize, profile.fontWeight);
+      let estimatedWidths = wrappedLines.map((line) => (
+        estimateLineWidth(line, fontSize, profile.fontWeight)
+      ));
+      let widestEstimatedLine = Math.max(1, ...estimatedWidths);
+      let metricOverflow = widestEstimatedLine > slot.wrapWidth;
+      let measuredWidth = Math.min(
+        slot.wrapWidth,
+        widestEstimatedLine + captionLineSafetyGutter(fontSize),
+      );
+      let measuredHeight = Math.round(wrappedLines.length * lineHeight);
+
+      let horizontal = slot.alignment % 3;
+      let x = horizontal === 1 ? slot.x
+        : horizontal === 2 ? slot.x - Math.round(measuredWidth / 2)
+          : slot.x - measuredWidth;
+      let y = slot.alignment >= 7 ? slot.y
+        : slot.alignment <= 3 ? slot.y - measuredHeight
+          : slot.y - Math.round(measuredHeight / 2);
+
+      let candidateRect = {
+        x: x,
+        y: y,
+        width: measuredWidth,
+        height: measuredHeight,
+      };
+      let collided = collisionRegions.filter((region) => rectsOverlap(candidateRect, region));
+      let insideOutput = rectWithinBounds(candidateRect, outputBounds);
+      let insideSafeBounds = rectWithinBounds(candidateRect, safeBounds);
+      let status = wrappedLines.length > lineBudget
+        ? 'too-many-lines'
+        : metricOverflow || !insideOutput || !insideSafeBounds
+          ? 'out-of-bounds'
+          : collided.length > 0 ? 'collided' : 'clear';
+
+      return {
+        zone: slot.zone,
+        horizontal: slot.horizontal,
+        alignment: slot.alignment,
+        fontSize,
+        lineHeight,
+        wrapWidth: slot.wrapWidth,
+        lineBudget,
+        wrappedLines,
+        rect: candidateRect,
+        status,
+        metricOverflow,
+        collidedRegionIds: collided.map((region) => region.id),
+        insideOutput,
+        insideSafeBounds,
       };
     };
 
@@ -820,29 +947,113 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
       selectedLineBudget = candidate.lineBudget;
       selectedFontSize = candidate.fontSize;
       selectedLineHeight = candidate.lineHeight;
+      selectedCandidateY = Number.isFinite(candidate.adaptiveY) ? candidate.adaptiveY : null;
     };
 
-    for (let candidate of placementCandidates) {
-      let evaluated = evaluateCandidate(candidate, profile.fontSize);
-      auditTrail.push(evaluated);
+    let previousCue = index > 0 ? track[index - 1] : null;
+    let shouldReset = false;
+    let switchReason = null;
 
-      if (evaluated.status === 'clear') {
-        acceptCandidate(evaluated);
-        break;
+    if (index === 0) {
+      shouldReset = true;
+      switchReason = 'initialization';
+    } else {
+      let gap = cueStartSec - previousCue.endSec;
+      let continuityGapSec = continuityGapMs / 1000;
+      let explicitDiscontinuity = resetsCaptionContinuity(cue);
+      if (gap > continuityGapSec || explicitDiscontinuity) {
+        shouldReset = true;
+        switchReason = 'discontinuity';
       }
     }
 
-    let minimumAdaptiveFontSize = Math.min(
-      profile.fontSize,
-      Math.max(18, Math.round(h * 0.028)),
-    );
-    for (let fontSize = profile.fontSize - 1; !selectedZone && fontSize >= minimumAdaptiveFontSize; fontSize -= 1) {
+    if (shouldReset) {
+      activeSlot = null;
+      usedSlotsInSequence = [];
+    }
+
+    if (activeSlot) {
+      let activeEvaluated = evaluateSlot(activeSlot);
+      auditTrail.push(activeEvaluated);
+
+      let hasCollision = activeEvaluated.collidedRegionIds.length > 0;
+      let hasSafeBoundsViolation = activeEvaluated.status !== 'clear' && !hasCollision;
+
+      if (!hasCollision && !hasSafeBoundsViolation) {
+        acceptCandidate(activeEvaluated);
+        switchReason = 'continuity';
+      } else {
+        if (hasCollision) {
+          switchReason = 'collision';
+        } else {
+          switchReason = 'safe-bounds';
+        }
+        usedSlotsInSequence.push(activeSlot);
+        activeSlot = null;
+      }
+    }
+
+    if (!selectedZone) {
       for (let candidate of placementCandidates) {
-        let evaluated = evaluateCandidate(candidate, fontSize, true);
+        let evaluated = evaluateCandidate(candidate, profile.fontSize);
         auditTrail.push(evaluated);
-        if (evaluated.status !== 'clear') continue;
-        acceptCandidate(evaluated);
-        break;
+
+        if (evaluated.status === 'clear') {
+          let candidateAnchor = captionPlacementAnchor(evaluated.rect, evaluated.alignment);
+          let candidateSlot = {
+            zone: evaluated.zone,
+            horizontal: evaluated.horizontal,
+            alignment: evaluated.alignment,
+            x: candidateAnchor.x,
+            y: candidateAnchor.y,
+            wrapWidth: evaluated.wrapWidth,
+            lineBudget: evaluated.lineBudget,
+            fontSize: evaluated.fontSize
+          };
+
+          let isPingPong = usedSlotsInSequence.some((s) => slotsEqual(s, candidateSlot));
+          if (isPingPong) {
+            continue;
+          }
+
+          acceptCandidate(evaluated);
+          break;
+        }
+      }
+    }
+
+    if (!selectedZone) {
+      let minimumAdaptiveFontSize = Math.min(
+        profile.fontSize,
+        Math.max(18, Math.round(h * 0.028)),
+      );
+      for (let fontSize = profile.fontSize - 1; !selectedZone && fontSize >= minimumAdaptiveFontSize; fontSize -= 1) {
+        for (let candidate of placementCandidates) {
+          let evaluated = evaluateCandidate(candidate, fontSize, true);
+          auditTrail.push(evaluated);
+
+          if (evaluated.status === 'clear') {
+            let candidateAnchor = captionPlacementAnchor(evaluated.rect, evaluated.alignment);
+            let candidateSlot = {
+              zone: evaluated.zone,
+              horizontal: evaluated.horizontal,
+              alignment: evaluated.alignment,
+              x: candidateAnchor.x,
+              y: candidateAnchor.y,
+              wrapWidth: evaluated.wrapWidth,
+              lineBudget: evaluated.lineBudget,
+              fontSize: evaluated.fontSize
+            };
+
+            let isPingPong = usedSlotsInSequence.some((s) => slotsEqual(s, candidateSlot));
+            if (isPingPong) {
+              continue;
+            }
+
+            acceptCandidate(evaluated);
+            break;
+          }
+        }
       }
     }
 
@@ -880,9 +1091,53 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
     });
 
     let placementAnchor = captionPlacementAnchor(selectedRect, selectedAlignment);
+
+    activeSlot = {
+      zone: selectedZone,
+      horizontal: selectedHorizontal,
+      alignment: selectedAlignment,
+      x: placementAnchor.x,
+      y: placementAnchor.y,
+      wrapWidth: selectedWrapWidth,
+      lineBudget: selectedLineBudget,
+      fontSize: selectedFontSize,
+    };
+
+    let slotChanged = previousCue && !slotsEqual(activeSlot, previousCue.placement);
+
+    if (slotChanged) {
+      relocationCount++;
+      if (switchReason === 'collision') {
+        forcedCollisionRelocationCount++;
+      } else if (switchReason === 'safe-bounds') {
+        forcedSafeBoundsRelocationCount++;
+      } else if (switchReason !== 'discontinuity' && switchReason !== 'initialization') {
+        unforcedSwitchCount++;
+      }
+    }
+
+    let acceptedHasCollision = activeAvoids.some((region) => rectsOverlap(selectedRect, region))
+      || activeCaptionRegions.some((region) => rectsOverlap(selectedRect, region));
+
+    let acceptedHasSafeBoundsViolation = !rectWithinBounds(selectedRect, outputBounds)
+      || !rectWithinBounds(selectedRect, safeBounds)
+      || selectedWrappedLines.length > selectedLineBudget
+      || selectedWrappedLines.some((line) => (
+        estimateLineWidth(line, selectedFontSize, profile.fontWeight) > selectedWrapWidth
+      ));
+
+    if (acceptedHasCollision) {
+      hardCollisionCount++;
+    }
+    if (acceptedHasSafeBoundsViolation) {
+      safeBoundsViolationCount++;
+    }
+
     track.push({
       cueId,
-      cueIndex: Number.isInteger(Number(cue.index)) ? Number(cue.index) : index,
+      cueIndex: Number.isInteger(Number(cue.cueIndex ?? cue.index))
+        ? Number(cue.cueIndex ?? cue.index)
+        : index,
       startSec: cueStartSec,
       endSec: cueEndSec,
       speaker: cueSpeaker,
@@ -892,6 +1147,7 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
       measuredRect: selectedRect,
       fontSize: selectedFontSize,
       lineHeight: selectedLineHeight,
+      ...continuityEvidence,
       placement: {
         zone: selectedZone,
         horizontal: selectedHorizontal,
@@ -900,7 +1156,9 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
         y: placementAnchor.y,
         wrapWidth: selectedWrapWidth,
         lineBudget: selectedLineBudget,
+        fontSize: selectedFontSize,
         margins: safeInsets,
+        ...(Number.isFinite(selectedCandidateY) ? { candidateY: selectedCandidateY } : {}),
       },
       decisionEvidence: {
         activeAvoidRegionIds: activeAvoids.map((region) => region.id),
@@ -909,22 +1167,52 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
         baseFontSize: profile.fontSize,
         selectedFontSize,
         auditTrail,
+        switchReason,
       },
     });
   }
 
+  let pingPongCount = 0;
+  for (let i = 2; i < track.length; i++) {
+    if (slotsEqual(track[i - 2].placement, track[i].placement) && !slotsEqual(track[i - 2].placement, track[i - 1].placement)) {
+      let hasDiscontinuity = false;
+      let continuityGapSec = continuityGapMs / 1000;
+      for (let j = i - 1; j <= i; j++) {
+        let prev = track[j - 1];
+        let curr = track[j];
+        let gap = curr.startSec - prev.endSec;
+        let explicitDiscontinuity = resetsCaptionContinuity(curr);
+        if (gap > continuityGapSec || explicitDiscontinuity) {
+          hasDiscontinuity = true;
+          break;
+        }
+      }
+      if (!hasDiscontinuity) {
+        pingPongCount++;
+      }
+    }
+  }
+
   return {
-    schemaVersion: 'caption-presentation-track-v1',
+    schemaVersion: CAPTION_PRESENTATION_TRACK_VERSION,
     profile,
     safeInsets,
     avoidRegions,
     cues: track,
+    continuityGapMs,
+    relocationCount,
+    unforcedSwitchCount,
+    pingPongCount,
+    hardCollisionCount,
+    safeBoundsViolationCount,
+    forcedCollisionRelocationCount,
+    forcedSafeBoundsRelocationCount,
   };
 }
 
 export function assertCaptionPlacementTrack(value = {}) {
-  if (!value || value.schemaVersion !== 'caption-presentation-track-v1') {
-    throw new TypeError('caption placement track must use caption-presentation-track-v1');
+  if (!value || value.schemaVersion !== CAPTION_PRESENTATION_TRACK_VERSION) {
+    throw new TypeError(`caption placement track must use ${CAPTION_PRESENTATION_TRACK_VERSION}`);
   }
   let profile = value.profile;
   if (!profile || profile.schemaVersion !== 'caption-presentation-profile-v1'
@@ -945,13 +1233,40 @@ export function assertCaptionPlacementTrack(value = {}) {
     throw new TypeError('caption placement track safe insets leave no readable output area');
   }
   if (!Array.isArray(value.cues)) throw new TypeError('caption placement track cues must be an array');
+
+  if (!Number.isInteger(value.relocationCount) || value.relocationCount < 0) {
+    throw new TypeError('caption placement track has an invalid relocationCount');
+  }
+  if (!Number.isInteger(value.unforcedSwitchCount) || value.unforcedSwitchCount < 0) {
+    throw new TypeError('caption placement track has an invalid unforcedSwitchCount');
+  }
+  if (!Number.isInteger(value.pingPongCount) || value.pingPongCount < 0) {
+    throw new TypeError('caption placement track has an invalid pingPongCount');
+  }
+  if (!Number.isInteger(value.hardCollisionCount) || value.hardCollisionCount < 0) {
+    throw new TypeError('caption placement track has an invalid hardCollisionCount');
+  }
+  if (!Number.isInteger(value.safeBoundsViolationCount) || value.safeBoundsViolationCount < 0) {
+    throw new TypeError('caption placement track has an invalid safeBoundsViolationCount');
+  }
+  if (!Number.isInteger(value.forcedCollisionRelocationCount) || value.forcedCollisionRelocationCount < 0) {
+    throw new TypeError('caption placement track has an invalid forcedCollisionRelocationCount');
+  }
+  if (!Number.isInteger(value.forcedSafeBoundsRelocationCount) || value.forcedSafeBoundsRelocationCount < 0) {
+    throw new TypeError('caption placement track has an invalid forcedSafeBoundsRelocationCount');
+  }
+  if (!Number.isInteger(value.continuityGapMs) || value.continuityGapMs <= 0) {
+    throw new TypeError('caption placement track has an invalid continuityGapMs');
+  }
+
   let ids = new Set();
   let acceptedCues = [];
   for (let [index, cue] of value.cues.entries()) {
-    if (!cue || !cue.cueId || ids.has(cue.cueId)) {
-      throw new TypeError(`caption placement track cue ${index} has a missing or duplicate identity`);
+    let cueId = explicitCaptionCueId(cue, index, 'caption placement track cue');
+    if (ids.has(cueId)) {
+      throw new TypeError(`caption placement track cue ${index} has a duplicate cueId`);
     }
-    ids.add(cue.cueId);
+    ids.add(cueId);
     if (!Number.isFinite(cue.startSec) || !Number.isFinite(cue.endSec)
       || cue.startSec < 0 || cue.endSec <= cue.startSec) {
       throw new TypeError(`caption placement track cue "${cue.cueId}" has invalid timing`);
@@ -965,7 +1280,8 @@ export function assertCaptionPlacementTrack(value = {}) {
     }
     if (!cue.placement || !Number.isInteger(cue.placement.alignment)
       || cue.placement.alignment < 1 || cue.placement.alignment > 9
-      || !Number.isFinite(cue.placement.x) || !Number.isFinite(cue.placement.y)) {
+      || !Number.isFinite(cue.placement.x) || !Number.isFinite(cue.placement.y)
+      || !Number.isInteger(cue.placement.fontSize)) {
       throw new TypeError(`caption placement track cue "${cue.cueId}" has invalid placement`);
     }
     if (!Number.isInteger(cue.placement.lineBudget)
@@ -1010,28 +1326,70 @@ export function assertCaptionPlacementTrack(value = {}) {
         `caption placement track cues "${overlappingCue.cueId}" and "${cue.cueId}" overlap`,
       );
     }
+
+    let validReasons = ['initialization', 'continuity', 'collision', 'safe-bounds', 'discontinuity'];
+    if (!validReasons.includes(cue.decisionEvidence?.switchReason)) {
+      throw new TypeError(`caption placement track cue "${cue.cueId}" has an invalid or missing switchReason`);
+    }
+    captionContinuityEvidence(cue, `caption placement track cue "${cue.cueId}"`);
+
     acceptedCues.push(cue);
   }
 
   if (!Array.isArray(value.avoidRegions)) {
     throw new TypeError('caption placement track avoid regions must be an array');
   }
+
+  let avoidIds = new Set();
+  for (let [index, region] of value.avoidRegions.entries()) {
+    let id = region?.id !== undefined ? cleanString(region.id, '') : '';
+    if (!id) {
+      throw new TypeError(`avoidRegions[${index}] has a missing or empty ID`);
+    }
+    if (avoidIds.has(id)) {
+      throw new TypeError(`duplicate avoid-region ID "${id}"`);
+    }
+    avoidIds.add(id);
+
+    let x = Number(region?.x ?? region?.left);
+    let y = Number(region?.y ?? region?.top);
+    let width = Number(region?.width);
+    let height = Number(region?.height);
+    if (![x, y, width, height].every(Number.isFinite) || width <= 0 || height <= 0) {
+      throw new TypeError(`avoidRegions[${index}] must contain a positive finite rectangle`);
+    }
+    let startSec = region?.startSec ?? region?.start;
+    let endSec = region?.endSec ?? region?.end;
+    if ((startSec === undefined) !== (endSec === undefined)) {
+      throw new TypeError(`avoidRegions[${index}] must provide both startSec and endSec`);
+    }
+    if (startSec !== undefined) {
+      startSec = Number(startSec);
+      endSec = Number(endSec);
+      if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || startSec < 0 || endSec <= startSec) {
+        throw new TypeError(`avoidRegions[${index}] has invalid timing`);
+      }
+    }
+  }
+
   let canonical;
   try {
     canonical = buildCaptionPlacementTrack(value.cues.map((cue) => ({
-      id: cue.cueId,
-      index: cue.cueIndex,
+      cueId: cue.cueId,
+      cueIndex: cue.cueIndex,
       startSec: cue.startSec,
       endSec: cue.endSec,
       speaker: cue.speaker,
       text: cue.text,
       wordTimings: cue.wordTimings,
+      ...captionContinuityEvidence(cue, `caption placement track cue "${cue.cueId}"`),
     })), {
       width: profile.width,
       height: profile.height,
       captionStyle: profile,
       safeInsets,
       avoidRegions: value.avoidRegions,
+      continuityGapMs: value.continuityGapMs,
     });
   } catch (cause) {
     throw new TypeError(`caption placement track cannot be reproduced from its evidence: ${cause.message}`);
@@ -1039,7 +1397,15 @@ export function assertCaptionPlacementTrack(value = {}) {
   if (!sameValue(profile, canonical.profile)
     || !sameValue(safeInsets, canonical.safeInsets)
     || !sameValue(value.avoidRegions, canonical.avoidRegions)
-    || !sameValue(value.cues, canonical.cues)) {
+    || !sameValue(value.cues, canonical.cues)
+    || value.continuityGapMs !== canonical.continuityGapMs
+    || value.relocationCount !== canonical.relocationCount
+    || value.unforcedSwitchCount !== canonical.unforcedSwitchCount
+    || value.pingPongCount !== canonical.pingPongCount
+    || value.hardCollisionCount !== canonical.hardCollisionCount
+    || value.safeBoundsViolationCount !== canonical.safeBoundsViolationCount
+    || value.forcedCollisionRelocationCount !== canonical.forcedCollisionRelocationCount
+    || value.forcedSafeBoundsRelocationCount !== canonical.forcedSafeBoundsRelocationCount) {
     throw new TypeError('caption placement track does not match its resolved presentation evidence');
   }
   return value;
@@ -1163,6 +1529,7 @@ export function captionCuesFromTranscript(transcript = {}, cues = []) {
     let gapSec = current ? startSec - current.endSec : 0;
     let shouldBreak = !current
       || current.speaker !== attribution.speaker
+      || current.cueId !== attribution.cueId
       || current.words.length >= CAPTION_MAX_WORDS
       || captionRenderedCharacterCount([...current.words, text], current.speaker) > CAPTION_MAX_CHARACTERS
       || gapSec > 0.75
@@ -1176,6 +1543,7 @@ export function captionCuesFromTranscript(transcript = {}, cues = []) {
         speaker: attribution.speaker,
         attributionSource: attribution.source,
         cueIndex: attribution.cueIndex,
+        cueId: attribution.cueId,
         unmappedWordCount: 0,
       };
       captionCues.push(current);
@@ -1197,6 +1565,7 @@ export function captionCuesFromTranscript(transcript = {}, cues = []) {
       speaker: attribution.speaker,
       attributionSource: attribution.source,
       cueIndex: attribution.cueIndex,
+      cueId: attribution.cueId,
       unmappedWordCount: attribution.source === 'unmapped' ? 1 : 0,
     });
   }
@@ -1384,6 +1753,7 @@ export function captionCuesFromTimedWords(timedWords = [], options = {}) {
       endSec,
       speaker: cleanString(word?.speaker, ''),
       cueIndex: Number.isFinite(Number(word?.cueIndex)) ? Number(word.cueIndex) : null,
+      cueId: cleanString(word?.cueId ?? word?.id ?? word?.index, ''),
       timingSource: cleanString(word?.timingSource ?? word?.attributionSource, 'timed-word'),
     };
   });
@@ -1395,6 +1765,7 @@ export function captionCuesFromTimedWords(timedWords = [], options = {}) {
     let shouldBreak = !current
       || current.speaker !== word.speaker
       || current.cueIndex !== word.cueIndex
+      || current.cueId !== word.cueId
       || current.attributionSource !== word.timingSource
       || current.words.length >= maxWords
       || captionRenderedCharacterCount([...current.words, word.text], current.speaker) > maxCharacters
@@ -1409,6 +1780,7 @@ export function captionCuesFromTimedWords(timedWords = [], options = {}) {
         speaker: word.speaker,
         attributionSource: word.timingSource,
         cueIndex: word.cueIndex,
+        cueId: word.cueId,
         unmappedWordCount: 0,
       };
       captionCues.push(current);
@@ -1432,6 +1804,7 @@ export function captionCuesFromClipTranscripts(clipTranscripts = []) {
         endSec: word.endSec,
         speaker: cleanString(clip.speaker, ''),
         cueIndex: Number.isFinite(Number(clip.cueIndex)) ? Number(clip.cueIndex) : null,
+        cueId: cleanString(clip.cueId ?? clip.id ?? clip.cueIndex, ''),
         timingSource,
       });
     }
@@ -1444,6 +1817,41 @@ function hasTimedClipTranscriptWords(clipTranscripts = []) {
     Array.isArray(clip?.words)
     && clip.words.some((word) => cleanString(word?.word || word?.text, ''))
   ));
+}
+
+function captionCueIdentityHash(value) {
+  let hash = 2166136261;
+  for (let character of String(value || '').normalize('NFC')) {
+    hash ^= character.codePointAt(0);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function assignCanonicalCaptionCueIds(cues = []) {
+  let sourceCounts = new Map();
+  for (let cue of cues) {
+    let sourceId = cleanString(cue?.cueId, '');
+    if (sourceId) sourceCounts.set(sourceId, (sourceCounts.get(sourceId) || 0) + 1);
+  }
+
+  let identities = new Set();
+  return cues.map((cue) => {
+    let sourceId = cleanString(cue?.cueId, '');
+    let cueId = sourceId && sourceCounts.get(sourceId) === 1
+      ? sourceId
+      : [
+          'caption',
+          sourceId ? `source-${captionCueIdentityHash(sourceId)}` : 'source-none',
+          `${Math.round(Number(cue.startSec) * 1000)}-${Math.round(Number(cue.endSec) * 1000)}`,
+          captionCueIdentityHash(`${cleanString(cue.speaker, '')}\u0000${cue.words.join(' ')}`),
+        ].join(':');
+    if (identities.has(cueId)) {
+      throw new TypeError(`caption cue identity "${cueId}" is ambiguous`);
+    }
+    identities.add(cueId);
+    return { ...cue, cueId };
+  });
 }
 
 function captionAlignmentSummary(clipTranscripts = []) {
@@ -1469,8 +1877,18 @@ function captionAlignmentSummary(clipTranscripts = []) {
 export function renderVtt(cues = []) {
   let includeSpeaker = new Set(cues.map((cue) => cleanString(cue.speaker, '')).filter(Boolean)).size > 1;
   let lines = ['WEBVTT', ''];
+  let cueIds = new Set();
   cues.forEach((cue, index) => {
-    lines.push(String(index + 1));
+    let rawCueId = String(cue?.cueId ?? '');
+    let cueId = cleanString(rawCueId, '');
+    if (!cueId || /[\r\n]/.test(rawCueId) || cueId.includes('-->')) {
+      throw new TypeError(`caption cue ${index} requires a valid canonical cueId`);
+    }
+    if (cueIds.has(cueId)) {
+      throw new TypeError(`duplicate cue ID "${cueId}"`);
+    }
+    cueIds.add(cueId);
+    lines.push(cueId);
     lines.push(`${formatVttTimestamp(cue.startSec)} --> ${formatVttTimestamp(cue.endSec)}`);
     let text = cue.words.join(' ');
     if (includeSpeaker && cue.speaker) text = `${cue.speaker.toUpperCase()}: ${text}`;
@@ -1489,9 +1907,10 @@ export function buildCaptionCues({
 } = {}) {
   let useClipTranscripts = hasTimedClipTranscriptWords(clipTranscripts);
   let alignment = captionAlignmentSummary(clipTranscripts);
-  let cues = useClipTranscripts
+  let rawCues = useClipTranscripts
     ? captionCuesFromClipTranscripts(clipTranscripts)
     : captionCuesFromTranscript(transcript, sourceCues);
+  let cues = assignCanonicalCaptionCueIds(rawCues);
   let source = 'whisper+range-map';
   if (useClipTranscripts && alignment.authoredClipCount === alignment.timedClipCount) {
     source = 'authored+whisper-clip-range-map';

@@ -130,6 +130,7 @@ export {
 } from './render-cache.js';
 export { createRenderJobCacheKey, createRenderProviderJobQueue } from './render-jobs.js';
 export {
+  CAPTION_PRESENTATION_TRACK_VERSION,
   buildCaptionCues,
   captionAttributionForRange,
   captionCueHasWordTimings,
