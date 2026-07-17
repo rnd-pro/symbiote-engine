@@ -475,6 +475,38 @@ test('buildCaptionPlacementTrack uses a free vertical shelf between persistent c
   )));
 });
 
+test('square captions preserve the largest readable cue font in a narrow safe shelf', () => {
+  let result = buildCaptionPlacementTrack([{
+    id: 'proof-explain-map:caption-3',
+    startSec: 0,
+    endSec: 2,
+    speaker: 'ops',
+    text: 'double-clicking empty space to',
+  }], {
+    preset: 'square',
+    fontSize: 43,
+    width: 1080,
+    height: 1080,
+    safeInsets: { top: 54, right: 54, bottom: 54, left: 54 },
+    avoidRegions: [
+      { id: 'focus', kind: 'focus', x: 54, y: 109, width: 667.609, height: 917, startSec: 0, endSec: 2 },
+      { id: 'action', kind: 'action', x: 54, y: 109, width: 667.609, height: 917, startSec: 0, endSec: 2 },
+      { id: 'annotation', kind: 'annotation', x: 733.609, y: 109, width: 120, height: 40, startSec: 0, endSec: 2 },
+      { id: 'chrome', kind: 'persistent-chrome', x: 0, y: 0, width: 1080, height: 110, startSec: 0, endSec: 2 },
+      { id: 'player', kind: 'critical-control', x: 771.609, y: 794.5, width: 291.391, height: 118, startSec: 0, endSec: 2 },
+      { id: 'composer', kind: 'critical-control', x: 755.609, y: 935, width: 323.391, height: 144, startSec: 0, endSec: 2 },
+    ],
+  });
+  let cue = result.cues[0];
+
+  assert.equal(cue.fontSize, 41);
+  assert.equal(cue.lineHeight, 53);
+  assert.equal(cue.decisionEvidence.adaptiveTypography, true);
+  assert.equal(cue.placement.horizontal, 'right');
+  assert.deepEqual(cue.measuredRect, { x: 726, y: 153, width: 300, height: 212 });
+  assert.match(renderAss(result), /\\fs41/);
+});
+
 test('bold caption metrics cover Chromium Arial measurements', () => {
   let result = buildCaptionPlacementTrack([
     {

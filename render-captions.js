@@ -660,6 +660,8 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
     let selectedWrappedLines = null;
     let selectedWrapWidth = null;
     let selectedLineBudget = null;
+    let selectedFontSize = null;
+    let selectedLineHeight = null;
     let auditTrail = [];
 
     let activeAvoids = avoidRegions.filter(region => {
@@ -742,19 +744,20 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
       }
     }
 
-    for (let candidate of placementCandidates) {
+    let evaluateCandidate = (candidate, fontSize, adaptiveTypography = false) => {
       let lineBudget = candidate.lineBudget || profile.maxLines;
-      let wrappedLines = wrapText(words, candidate.wrapWidth, profile.fontSize, profile.fontWeight);
+      let lineHeight = Math.round(fontSize * 1.3);
+      let wrappedLines = wrapText(words, candidate.wrapWidth, fontSize, profile.fontWeight);
       let estimatedWidths = wrappedLines.map((line) => (
-        estimateLineWidth(line, profile.fontSize, profile.fontWeight)
+        estimateLineWidth(line, fontSize, profile.fontWeight)
       ));
       let widestEstimatedLine = Math.max(1, ...estimatedWidths);
       let metricOverflow = widestEstimatedLine > candidate.wrapWidth;
       let measuredWidth = Math.min(
         candidate.wrapWidth,
-        widestEstimatedLine + captionLineSafetyGutter(profile.fontSize),
+        widestEstimatedLine + captionLineSafetyGutter(fontSize),
       );
-      let measuredHeight = Math.round(wrappedLines.length * profile.lineHeight);
+      let measuredHeight = Math.round(wrappedLines.length * lineHeight);
       let horizontalBounds = candidate.span || safeBounds;
       let horizontalRight = horizontalBounds.x + horizontalBounds.width;
       let x = candidate.horizontal === 'left'
@@ -788,10 +791,13 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
           ? 'out-of-bounds'
           : collided.length > 0 ? 'collided' : 'clear';
       let alignment = captionAlignment(candidate.zone, candidate.horizontal);
-      auditTrail.push({
+      return {
         zone: candidate.zone,
         horizontal: candidate.horizontal,
         alignment,
+        fontSize,
+        lineHeight,
+        adaptiveTypography,
         wrapWidth: candidate.wrapWidth,
         lineBudget,
         ...(Number.isFinite(candidate.y) ? { adaptiveY: candidate.y } : {}),
@@ -801,16 +807,41 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
         status,
         metricOverflow,
         collidedRegionIds: collided.map((region) => region.id),
-      });
+      };
+    };
 
-      if (status === 'clear') {
-        selectedZone = candidate.zone;
-        selectedHorizontal = candidate.horizontal;
-        selectedRect = candidateRect;
-        selectedAlignment = alignment;
-        selectedWrappedLines = wrappedLines;
-        selectedWrapWidth = candidate.wrapWidth;
-        selectedLineBudget = lineBudget;
+    let acceptCandidate = (candidate) => {
+      selectedZone = candidate.zone;
+      selectedHorizontal = candidate.horizontal;
+      selectedRect = candidate.rect;
+      selectedAlignment = candidate.alignment;
+      selectedWrappedLines = candidate.wrappedLines;
+      selectedWrapWidth = candidate.wrapWidth;
+      selectedLineBudget = candidate.lineBudget;
+      selectedFontSize = candidate.fontSize;
+      selectedLineHeight = candidate.lineHeight;
+    };
+
+    for (let candidate of placementCandidates) {
+      let evaluated = evaluateCandidate(candidate, profile.fontSize);
+      auditTrail.push(evaluated);
+
+      if (evaluated.status === 'clear') {
+        acceptCandidate(evaluated);
+        break;
+      }
+    }
+
+    let minimumAdaptiveFontSize = Math.min(
+      profile.fontSize,
+      Math.max(18, Math.round(h * 0.028)),
+    );
+    for (let fontSize = profile.fontSize - 1; !selectedZone && fontSize >= minimumAdaptiveFontSize; fontSize -= 1) {
+      for (let candidate of placementCandidates) {
+        let evaluated = evaluateCandidate(candidate, fontSize, true);
+        auditTrail.push(evaluated);
+        if (evaluated.status !== 'clear') continue;
+        acceptCandidate(evaluated);
         break;
       }
     }
@@ -859,6 +890,8 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
       wordTimings,
       wrappedLines: selectedWrappedLines,
       measuredRect: selectedRect,
+      fontSize: selectedFontSize,
+      lineHeight: selectedLineHeight,
       placement: {
         zone: selectedZone,
         horizontal: selectedHorizontal,
@@ -872,6 +905,9 @@ export function buildCaptionPlacementTrack(cues = [], options = {}) {
       decisionEvidence: {
         activeAvoidRegionIds: activeAvoids.map((region) => region.id),
         activeCaptionCueIds: activeCaptionRegions.map((region) => region.cueId),
+        adaptiveTypography: selectedFontSize < profile.fontSize,
+        baseFontSize: profile.fontSize,
+        selectedFontSize,
         auditTrail,
       },
     });
@@ -922,6 +958,10 @@ export function assertCaptionPlacementTrack(value = {}) {
     }
     if (!cleanString(cue.text, '') || !Array.isArray(cue.wrappedLines) || !cue.wrappedLines.length) {
       throw new TypeError(`caption placement track cue "${cue.cueId}" has invalid text lines`);
+    }
+    if (!Number.isInteger(cue.fontSize) || cue.fontSize < 18 || cue.fontSize > profile.fontSize
+      || !Number.isInteger(cue.lineHeight) || cue.lineHeight !== Math.round(cue.fontSize * 1.3)) {
+      throw new TypeError(`caption placement track cue "${cue.cueId}" has invalid typography`);
     }
     if (!cue.placement || !Number.isInteger(cue.placement.alignment)
       || cue.placement.alignment < 1 || cue.placement.alignment > 9
@@ -1037,7 +1077,8 @@ export function renderAss(input = {}) {
     let posY = item.placement.y;
 
     let textWithKaraoke = assFormattedText(item);
-    let formattedLine = `{\\an${alignment}\\pos(${posX},${posY})}${textWithKaraoke}`;
+    let fontSizeOverride = item.fontSize === profile.fontSize ? '' : `\\fs${item.fontSize}`;
+    let formattedLine = `{\\an${alignment}\\pos(${posX},${posY})${fontSizeOverride}}${textWithKaraoke}`;
 
     events.push([
       'Dialogue: 0',

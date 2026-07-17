@@ -11,6 +11,9 @@
   readable zone is occupied. Narrow safe side columns receive an adaptive
   six-line budget for canonical five-word, speaker-labelled cues, preserving
   the configured font size while the normal full-width line limit stays intact.
+  When a long word alone exceeds a collision-free shelf, the cue now selects
+  the largest readable font down to the output-relative accessibility floor;
+  the same measured cue typography is retained by live DOM and ASS output.
   Caption profiles now carry a validated regular/bold weight; conservative
   weight-aware metrics and a regular-weight vertical preset prevent live and
   ASS text from being clipped by narrow columns.
