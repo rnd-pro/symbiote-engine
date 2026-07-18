@@ -2,17 +2,27 @@
 
 ## Unreleased
 
+## 0.3.0-alpha.14
+
+- Upgraded the public caption placement track contract to `caption-presentation-track-v3`.
+- Stopped manufacturing fallback cue IDs in `assignCanonicalCaptionCueIds` and enforced strict unique safe cue ID validation matching `/^[a-z][a-z0-9._:-]*$/` across entry points.
+- Refactored caption placement taxonomy: limited `switchReason` to `'initialization'`, `'collision'`, `'safe-bounds'`, and `null`. Set `switchReason` to `null` for retained slots.
+- Added explicit reconstructable decision evidence (`decision` and `discontinuity`) to cues.
+- Separated compact focus intersection, active-caption intersection, and other collision evidence. Relocated cues now carry `collidedRegions` details of IDs and kinds.
+- Enhanced track hash coverage in `computeTrackHash` to cover the entire track object minus the `trackHash` key.
+- Hardened `parseAss` to fail closed on malformed/non-finite timestamps, start/end timing anomalies, duplicate or unsafe Effect IDs, and invalid placement tags.
+
 ## 0.3.0-alpha.13
 
 - Retain an active caption slot until its measured rectangle actually intersects an attention region; placement search still keeps a small visual gap after a forced move.
 - Reflow reused slots that no longer fit, validate continuity controls before output, and preserve adjacent source cue identities through VTT generation.
-- Exported `CAPTION_PRESENTATION_TRACK_VERSION` for the canonical v2 contract and
+- Exported `CAPTION_PRESENTATION_TRACK_VERSION` for the canonical v3 contract and
   made `cueId` an explicit, nonempty requirement; legacy `id`, `index`, and
   synthesized identities no longer satisfy caption placement or range
   attribution.
 - Preserved cue indexes, scene-boundary/reset/discontinuity evidence, and the
-  configured continuity gap when v2 placement tracks are shifted and rebuilt.
-- Upgraded the public caption placement track contract to `caption-presentation-track-v2`.
+  configured continuity gap when v3 placement tracks are shifted and rebuilt.
+- Upgraded the public caption placement track contract to `caption-presentation-track-v3`.
 - Corrected proof metrics: `hardCollisionCount` and `safeBoundsViolationCount` now count only unresolved final defects (which are zero for successfully placed tracks).
 - Added `forcedCollisionRelocationCount` and `forcedSafeBoundsRelocationCount` to count successfully resolved relocations.
 - Fixed `unforcedSwitchCount` to not increment during allowed discontinuity resets.

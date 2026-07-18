@@ -94,3 +94,23 @@ export {
   normalizeSeamPolicy,
   segmentCompatibilityKey,
 } from './contracts/index.js';
+
+export {
+  CAPTION_PRESENTATION_TRACK_VERSION,
+  buildCaptionCues,
+  captionAttributionForRange,
+  captionCueHasWordTimings,
+  captionCuesFromClipTranscripts,
+  captionCuesFromTimedWords,
+  captionCuesFromTranscript,
+  captionTranscriptDurationSec,
+  captionWordTimeSeconds,
+  overlapMs,
+  assertCaptionPlacementTrack,
+  buildCaptionPlacementTrack,
+  renderAss,
+  renderVtt,
+  resolveCaptionProfile,
+  parseAss,
+  joinCaptionArtifacts,
+} from './render-captions.js';

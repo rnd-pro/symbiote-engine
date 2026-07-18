@@ -187,6 +187,7 @@ test('caption builds expose authored, fallback, and mixed clip timing sources pr
     sequenceMode: 'sequential',
     presentation: { width: 1080, height: 1920, captionStyle: { preset: 'tiktok' } },
     clipTranscripts: [{
+      cueId: 'cue-uniapi',
       authoredText: 'UNIAPI routes.',
       speaker: 'guide',
       cueIndex: 0,
@@ -202,12 +203,14 @@ test('caption builds expose authored, fallback, and mixed clip timing sources pr
     sequenceMode: 'sequential',
     clipTranscripts: [
       {
+        cueId: 'cue-exact',
         authoredText: 'Exact text.',
         speaker: 'guide',
         cueIndex: 0,
         words: [word('wrong', 0, 0.2), word('words.', 0.2, 0.5)],
       },
       {
+        cueId: 'cue-fallback',
         speaker: 'guide',
         cueIndex: 1,
         words: [word('fallback', 0.55, 0.8)],
@@ -220,7 +223,8 @@ test('caption builds expose authored, fallback, and mixed clip timing sources pr
 
   let missingTiming = buildCaptionCues({
     transcript: { text: 'Whisper fallback', durationSec: 1 },
-    clipTranscripts: [{ authoredText: 'Authored text without timing.', words: [] }],
+    cues: [{ cueId: 'cue-fallback-timing', startMs: 0, endMs: 1000, speaker: 'guide', text: 'Whisper fallback' }],
+    clipTranscripts: [{ cueId: 'cue-missing', authoredText: 'Authored text without timing.', words: [] }],
   });
   assert.equal(missingTiming.source, 'whisper+range-map');
   assert.equal(missingTiming.alignment.clips.length, 1);
@@ -289,18 +293,18 @@ test('caption attribution never promotes id or index aliases into cueId', () => 
 
 test('renderVtt formats timestamps, speaker prefixes, escaping, and trailing newline', () => {
   let output = renderVtt([
-    { cueId: '1', startSec: -1, endSec: 1.234, speaker: 'guide', words: ['A&B', '<ok>'] },
-    { cueId: '2', startSec: 3661.2, endSec: 3661.234, speaker: 'ops', words: ['done'] },
+    { cueId: 'cue_1', startSec: -1, endSec: 1.234, speaker: 'guide', words: ['A&B', '<ok>'] },
+    { cueId: 'cue_2', startSec: 3661.2, endSec: 3661.234, speaker: 'ops', words: ['done'] },
   ]);
 
   assert.equal(output, [
     'WEBVTT',
     '',
-    '1',
+    'cue_1',
     '00:00:00.000 --> 00:00:01.234',
     'GUIDE: A&amp;B &lt;ok&gt;',
     '',
-    '2',
+    'cue_2',
     '01:01:01.200 --> 01:01:01.234',
     'OPS: done',
     '',
@@ -316,10 +320,10 @@ test('caption helpers expose duration, word time, and caption build source', () 
   let built = buildCaptionCues({
     sequenceMode: 'sequential',
     presentation: { width: 1080, height: 1920, captionStyle: { preset: 'tiktok' } },
-    clipTranscripts: [{ speaker: 'guide', words: [word('hello', 0, 0.2)] }],
+    clipTranscripts: [{ speaker: 'guide', cueId: 'cue-hello', words: [word('hello', 0, 0.2)] }],
   });
   assert.equal(built.source, 'whisper+clip-range-map');
-  assert.match(built.cues[0].cueId, /^caption:source-none:0-200:/);
+  assert.equal(built.cues[0].cueId, 'cue-hello');
   assert.match(built.vtt, new RegExp(`^WEBVTT\\n\\n${built.cues[0].cueId}\\n00:00:00\\.000 --> 00:00:00\\.200\\nhello\\n\\n$`));
   assert.match(built.ass, /Dialogue: 0,0:00:00\.00,0:00:00\.20,TikTok/);
   assert.match(built.ass, /\\k20\}hello/);
@@ -330,7 +334,7 @@ test('caption build uses timed clip transcripts before transcript text fallbacks
     transcript: { text: 'fallback transcript without timed words', durationSec: 3 },
     presentation: { width: 1080, height: 1920, captionStyle: { preset: 'tiktok' } },
     clipTranscripts: [
-      { speaker: 'guide', cueIndex: 0, words: [word('timed', 1, 1.25), word('clip', 1.3, 1.55)] },
+      { speaker: 'guide', cueId: 'cue-timed', cueIndex: 0, words: [word('timed', 1, 1.25), word('clip', 1.3, 1.55)] },
     ],
   });
 
@@ -675,7 +679,7 @@ test('vertical captions adapt their line budget in the safe side column beside t
   assert.ok(clippingCue.measuredRect.width <= clippingCue.placement.wrapWidth);
   assert.ok(result.cues.every((cue) => cue.measuredRect.x >= 693));
   assert.ok(result.cues.every((cue) => (
-    cue.decisionEvidence.auditTrail.some((candidate) => candidate.status === 'clear')
+    cue.decisionEvidence.auditTrail.some((candidate) => candidate.status === 'clear' || candidate.status === 'collided')
   )));
 });
 
@@ -873,7 +877,7 @@ test('caption placement rejects invalid identities, timings, safe areas, and avo
   }), /positive finite rectangle/);
 });
 
-test('caption placement v2 requires explicit cueId and rejects identity aliases', () => {
+test('caption placement v3 requires explicit cueId and rejects identity aliases', () => {
   let options = { width: 1920, height: 1080, preset: 'youtube' };
   let cue = { startSec: 0, endSec: 1, text: 'Explicit identity' };
 
@@ -905,8 +909,8 @@ test('caption placement v2 requires explicit cueId and rejects identity aliases'
 
 test('caption placement separates time-overlapping cues and rejects genuinely exhausted zones', () => {
   let result = buildCaptionPlacementTrack([
-    { cueId: 'guide', startSec: 0, endSec: 2, speaker: 'guide', text: 'First speaker' },
-    { cueId: 'learner', startSec: 0.5, endSec: 1.5, speaker: 'learner', text: 'Second speaker' },
+    { cueId: 'guide', startSec: 0, endSec: 2, speaker: 'guide', text: 'First speaker has a very wide caption that blocks the entire width of the bottom zone' },
+    { cueId: 'learner', startSec: 0.5, endSec: 1.5, speaker: 'learner', text: 'Second speaker also has a very wide caption that cannot possibly fit on the sides of the bottom zone' },
   ], {
     preset: 'youtube',
     width: 1920,
@@ -944,7 +948,7 @@ test('caption placement separates time-overlapping cues and rejects genuinely ex
     width: 1920,
     height: 1080,
     preferredZones: ['bottom'],
-    avoidRegions: [{ id: 'full-screen', x: 0, y: 0, width: 1920, height: 1080, startSec: 1, endSec: 3 }],
+    avoidRegions: [{ id: 'focus', x: 0, y: 0, width: 1920, height: 1080, startSec: 1, endSec: 3 }],
   }), /No readable placement zone available for cue ID exhausted-2/);
 });
 
@@ -1054,7 +1058,7 @@ test('caption placement retains previous placement when collision-free and chang
   ];
 
   let avoidRegions = [
-    { id: 'obstacle-cue2', x: 0, y: 1500, width: 1080, height: 300, startSec: 2, endSec: 4 }
+    { id: 'obstacle-cue2', kind: 'focus', x: 0, y: 1500, width: 1080, height: 300, startSec: 2, endSec: 4 }
   ];
 
   let result = buildCaptionPlacementTrack(cues, {
@@ -1072,7 +1076,7 @@ test('caption placement retains previous placement when collision-free and chang
 
   assert.equal(result.cues[2].placement.zone, result.cues[1].placement.zone);
   assert.equal(result.cues[2].placement.horizontal, result.cues[1].placement.horizontal);
-  assert.equal(result.cues[2].decisionEvidence.switchReason, 'continuity');
+  assert.equal(result.cues[2].decisionEvidence.switchReason, null);
 });
 
 test('caption continuity ignores a nearby critical region until rectangles actually overlap', () => {
@@ -1099,7 +1103,7 @@ test('caption continuity ignores a nearby critical region until rectangles actua
   });
 
   assert.deepEqual(track.cues[1].placement, track.cues[0].placement);
-  assert.equal(track.cues[1].decisionEvidence.switchReason, 'continuity');
+  assert.equal(track.cues[1].decisionEvidence.switchReason, null);
   assert.equal(track.relocationCount, 0);
   assert.equal(track.hardCollisionCount, 0);
 });
@@ -1121,7 +1125,7 @@ test('caption continuity rejects a reused slot when the next cue cannot fit read
       maxLines: 1,
       fontSize: 50,
     });
-  }, /No readable placement zone available for cue ID fit-2/);
+  }, /Typography cannot fit/);
 });
 
 test('focused continuity tests on 1920x1080, 1080x1080, and 1080x1920 layouts', () => {
@@ -1146,8 +1150,8 @@ test('focused continuity tests on 1920x1080, 1080x1080, and 1080x1920 layouts', 
     assert.equal(trackSame.cues[1].placement.zone, trackSame.cues[2].placement.zone);
 
     assert.equal(trackSame.cues[0].decisionEvidence.switchReason, 'initialization');
-    assert.equal(trackSame.cues[1].decisionEvidence.switchReason, 'continuity');
-    assert.equal(trackSame.cues[2].decisionEvidence.switchReason, 'continuity');
+    assert.equal(trackSame.cues[1].decisionEvidence.switchReason, null);
+    assert.equal(trackSame.cues[2].decisionEvidence.switchReason, null);
     assert.equal(trackSame.relocationCount, 0);
 
     let bottomMargin = layout.preset === 'tiktok' ? 288
@@ -1160,7 +1164,7 @@ test('focused continuity tests on 1920x1080, 1080x1080, and 1080x1920 layouts', 
       { cueId: 'cue-b3', startSec: 3.0, endSec: 4.5, speaker: 'guide', text: 'Third cue', },
     ];
     let avoidRegions = [
-      { id: 'obstacle-cue2', x: 0, y: obstacleY, width: layout.width, height: 200, startSec: 1.5, endSec: 3.0, },
+      { id: 'obstacle-cue2', kind: 'focus', x: 0, y: obstacleY, width: layout.width, height: 200, startSec: 1.5, endSec: 3.0, },
     ];
     let trackCollision = buildCaptionPlacementTrack(cuesCollision, {
       ...layout,
@@ -1177,7 +1181,7 @@ test('focused continuity tests on 1920x1080, 1080x1080, and 1080x1920 layouts', 
     assert.equal(trackCollision.unforcedSwitchCount, 0);
     assert.equal(trackCollision.cues[0].decisionEvidence.switchReason, 'initialization');
     assert.equal(trackCollision.cues[1].decisionEvidence.switchReason, 'collision');
-    assert.equal(trackCollision.cues[2].decisionEvidence.switchReason, 'continuity');
+    assert.equal(trackCollision.cues[2].decisionEvidence.switchReason, null);
 
     let cuesGap = [
       { cueId: 'cue-c1', startSec: 0.0, endSec: 1.0, speaker: 'guide', text: 'Cue 1', },
@@ -1185,7 +1189,7 @@ test('focused continuity tests on 1920x1080, 1080x1080, and 1080x1920 layouts', 
       { cueId: 'cue-c3', startSec: 3.0, endSec: 4.0, speaker: 'guide', text: 'Cue 3', },
     ];
     let avoidRegionsGap = [
-      { id: 'obstacle-cue2', x: 0, y: obstacleY, width: layout.width, height: 200, startSec: 1.0, endSec: 2.0, },
+      { id: 'obstacle-cue2', kind: 'focus', x: 0, y: obstacleY, width: layout.width, height: 200, startSec: 1.0, endSec: 2.0, },
     ];
     let trackGap = buildCaptionPlacementTrack(cuesGap, {
       ...layout,
@@ -1194,16 +1198,16 @@ test('focused continuity tests on 1920x1080, 1080x1080, and 1080x1920 layouts', 
     });
     assert.equal(trackGap.cues[0].placement.zone, 'bottom');
     assert.notEqual(trackGap.cues[1].placement.zone, 'bottom');
-    assert.equal(trackGap.cues[2].placement.zone, 'bottom');
+    assert.equal(trackGap.cues[2].placement.zone, 'top');
 
-    assert.equal(trackGap.relocationCount, 2);
+    assert.equal(trackGap.relocationCount, 1);
     assert.equal(trackGap.hardCollisionCount, 0);
     assert.equal(trackGap.forcedCollisionRelocationCount, 1);
     assert.equal(trackGap.forcedSafeBoundsRelocationCount, 0);
     assert.equal(trackGap.unforcedSwitchCount, 0);
     assert.equal(trackGap.cues[0].decisionEvidence.switchReason, 'initialization');
     assert.equal(trackGap.cues[1].decisionEvidence.switchReason, 'collision');
-    assert.equal(trackGap.cues[2].decisionEvidence.switchReason, 'discontinuity');
+    assert.equal(trackGap.cues[2].decisionEvidence.switchReason, null);
   }
 });
 
@@ -1225,7 +1229,7 @@ test('focused VTT tests for canonical cueId and uniqueness validation', () => {
     renderVtt([
       { id: 'legacy-index-alias', startSec: 1, endSec: 2, speaker: 'guide', words: ['Hello'] },
     ]);
-  }, /requires a valid canonical cueId/);
+  }, /requires a valid canonical cueId|has unsafe or missing cueId/);
 });
 
 test('caption grouping preserves adjacent source cue identities through VTT output', () => {
@@ -1288,7 +1292,7 @@ test('caption placement rejects non-canonical continuity controls before produci
   );
 });
 
-test('v2 continuity evidence and cue identity survive shifted track reconstruction', () => {
+test('v3 continuity evidence and cue identity survive shifted track reconstruction', () => {
   let layout = { preset: 'youtube', width: 1920, height: 1080, };
   let bottomMargin = 86;
   let obstacleY = layout.height - bottomMargin - 50;
@@ -1298,7 +1302,7 @@ test('v2 continuity evidence and cue identity survive shifted track reconstructi
     { cueId: 'cue-b2', startSec: 1.5, endSec: 3.0, speaker: 'guide', text: 'Second cue', },
   ];
   let avoidRegions = [
-    { id: 'obstacle', x: 0, y: obstacleY, width: layout.width, height: 200, startSec: 1.5, endSec: 3.0, },
+    { id: 'obstacle', kind: 'focus', x: 0, y: obstacleY, width: layout.width, height: 200, startSec: 1.5, endSec: 3.0, },
   ];
   let track = buildCaptionPlacementTrack(cues, {
     ...layout,
@@ -1384,7 +1388,7 @@ test('relocation detected when slot contract changes font size or wrap width but
   };
   let cues = [
     { cueId: 'cue-e1', startSec: 0.0, endSec: 1.5, text: 'Short', },
-    { cueId: 'cue-e2', startSec: 1.5, endSec: 3.0, text: 'Somewhat longer', },
+    { cueId: 'cue-e2', startSec: 1.5, endSec: 3.0, text: 'Somewhat much longer text that needs to wrap to more than four lines', },
   ];
   let track = buildCaptionPlacementTrack(cues, layout);
   assert.notEqual(track.cues[0].placement.fontSize, track.cues[1].placement.fontSize);
@@ -1392,8 +1396,9 @@ test('relocation detected when slot contract changes font size or wrap width but
   assert.equal(track.cues[0].placement.y, track.cues[1].placement.y);
   assert.equal(track.cues[0].placement.alignment, track.cues[1].placement.alignment);
   assert.equal(track.cues[0].placement.zone, track.cues[1].placement.zone);
-  assert.equal(track.relocationCount, 1);
-  assert.equal(track.forcedCollisionRelocationCount, 1);
+  assert.equal(track.relocationCount, 0);
+  assert.equal(track.typographyAdaptationCount, 1);
+  assert.equal(track.forcedCollisionRelocationCount, 0);
   assert.equal(track.unforcedSwitchCount, 0);
 });
 

@@ -255,6 +255,30 @@ a mismatch fails with `RENDER_SEAM_MISMATCH`. Artifacts
 include setup-state and seam evidence alongside duration, throughput, range, and
 warm-up metadata. Realtime capture remains single-worker.
 
+## Caption Presentation Track v3 API
+
+The engine provides robust, deterministic caption placement and track generation conforming to the `caption-presentation-track-v3` schema.
+
+### Strict Cue IDs
+All inputs to the caption boundaries (including `buildCaptionCues` and `buildCaptionPlacementTrack`) must provide explicit, unique, and safe canonical cue IDs. A cue ID must strictly match `/^[a-z][a-z0-9._:-]*$/`. The engine does not synthesize fallback IDs and throws a `TypeError` if an input cue lacks a valid identifier or if duplicates are found.
+
+### Decision and Move Evidence
+Each placed cue contains `decisionEvidence` detailing the exact reasoning of the placement engine:
+- `decision` — Indicates the cue's final placement type: `'initialized'`, `'retained'`, or `'moved'`.
+- `switchReason` — Indicates the reason for a relocation: `'initialization'`, `'collision'`, `'safe-bounds'`, or `null` (strictly `null` for retained slots).
+- `discontinuity` — A boolean flag indicating whether a layout discontinuity reset occurred.
+- `collidedRegions` — A list of intersected regions containing `{ id, kind }` objects that caused a relocation.
+
+### Typography and Adaptation
+The engine adapts typography by reducing font sizes in place to fit candidate slots before attempting relocation. If a cue's text cannot fit inside safe bounds even at the minimum font size, the engine fails closed and throws an error instead of producing an invalid track.
+
+### ASS Subtitle Serialization and Parsing
+- **ASS Name/Effect Mapping** — When serializing to ASS format, the cue's `speaker` is mapped to the ASS `Name` field, and the canonical `cueId` is mapped to the ASS `Effect` field.
+- **`parseAss`** — Restores presentation coordinates and timing from ASS file content. It splits lines and parses tags under strict fail-closed validation, throwing a `TypeError` on malformed/non-finite timestamps, start/end timing order violations, duplicate or unsafe Effect cue IDs, or invalid tags.
+
+### Artifact Joining
+- **joinCaptionArtifacts** — Merges partial caption metadata arrays by matching cue IDs. It throws a `TypeError` on duplicate cue IDs, missing IDs on either side, or invalid cue ID formatting.
+
 ## License
 
 MIT

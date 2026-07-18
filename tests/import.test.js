@@ -67,7 +67,7 @@ test('root engine API imports in Node', async () => {
   assert.ok(Array.isArray(engine.UI_CLOCK_MODES));
   assert.equal(engine.NATIVE_SEGMENT_JOB_VERSION, 'native-segment-job/1');
   assert.equal(engine.RENDER_SEAM_INPUT_VERSION, 'render-seam-input/1');
-  assert.equal(engine.CAPTION_PRESENTATION_TRACK_VERSION, 'caption-presentation-track-v2');
+  assert.equal(engine.CAPTION_PRESENTATION_TRACK_VERSION, 'caption-presentation-track-v3');
 });
 
 test('graph can be constructed without browser runtime', async () => {
