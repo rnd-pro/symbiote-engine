@@ -1,0 +1,683 @@
+import { renderFooter, renderHead, renderHeader, renderScripts, routes } from './layout.js';
+
+const landingStyles = `
+  .landing-shell {
+    width: 100%;
+    margin: 0 auto;
+    padding: 0;
+    box-sizing: border-box;
+  }
+
+  @media (min-width: 1152px) {
+    .landing-shell {
+      width: 1152px;
+    }
+  }
+
+  @media (min-width: 901px) and (max-width: 1151px) {
+    .landing-shell {
+      width: 100%;
+      padding: 0 24px;
+    }
+  }
+
+  .hero {
+    position: relative;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .hero-title-accent { color: var(--brand); }
+
+  @media (min-width: 901px) {
+    .hero {
+      height: 628px;
+    }
+
+    .display-type {
+      position: absolute;
+      top: 80px;
+      left: 0;
+      margin: 0;
+      font-size: 56px;
+      line-height: 64px;
+      font-weight: 700;
+      max-width: 576px;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+    }
+
+    .display-type span {
+      display: block;
+    }
+
+    .hero-lead {
+      position: absolute;
+      top: 336px;
+      left: 0;
+      margin: 0;
+      font-size: 24px;
+      line-height: 36px;
+      font-weight: 500;
+      max-width: 576px;
+      color: var(--muted);
+    }
+
+    .hero-actions {
+      position: absolute;
+      top: 524px;
+      left: 0;
+      margin: 0;
+      display: flex;
+      gap: 16px;
+    }
+  }
+
+  .button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 40px;
+    padding: 0 24px;
+    border-radius: 20px;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    box-sizing: border-box;
+    transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
+  }
+
+  .button--primary {
+    background: var(--brand);
+    color: var(--page);
+    border: 1px solid var(--brand);
+  }
+
+  :root[data-theme="dark"] .button--primary {
+    color: var(--page);
+  }
+
+  .button--primary:hover {
+    background: var(--brand-strong);
+    border-color: var(--brand-strong);
+  }
+
+  .button:not(.button--primary) {
+    background: var(--surface-soft);
+    color: var(--ink);
+    border: 1px solid transparent;
+  }
+
+  .button:not(.button--primary):hover {
+    background: var(--surface);
+    border-color: transparent;
+  }
+
+  .story-intro {
+    text-align: center;
+    max-width: 720px;
+    margin: 0 auto;
+    padding-top: 24px;
+    box-sizing: border-box;
+  }
+
+  .story-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--brand);
+    background: var(--brand-soft);
+    border: 1px solid var(--brand);
+    padding: 4px 10px;
+    border-radius: 9999px;
+    margin: 0 auto 34px auto;
+  }
+
+  .story-eyebrow-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
+
+  .story-title {
+    font-size: 40px;
+    line-height: 46px;
+    font-weight: 700;
+    margin: 0 0 16px 0;
+    color: var(--ink);
+    letter-spacing: -0.02em;
+  }
+
+  .story-lead {
+    font-size: 16.8px;
+    line-height: 26.88px;
+    font-weight: 400;
+    color: var(--muted);
+    margin: 0 0 64px 0;
+  }
+
+  .chapter-row {
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    width: 100%;
+    max-width: 1104px;
+    height: 280px;
+    margin: 0 auto 80px auto;
+    box-sizing: border-box;
+  }
+
+  article.chapter-row:nth-of-type(even) {
+    flex-direction: row-reverse;
+  }
+
+  .chapter-text {
+    width: 505px;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .chapter-visual {
+    width: 559px;
+    flex-shrink: 1;
+    min-width: 0;
+  }
+
+  .chapter-num {
+    display: block;
+    color: var(--brand);
+    font-size: 14px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 8px;
+  }
+
+  .chapter-title {
+    font-size: 25.6px;
+    line-height: 32px;
+    font-weight: 650;
+    margin: 0 0 12px 0;
+    color: var(--ink);
+  }
+
+  .chapter-desc {
+    font-size: 16px;
+    line-height: 26.4px;
+    color: var(--muted);
+    margin: 0;
+  }
+
+  .diagram-surface {
+    width: 100%;
+    max-width: 559px;
+    height: auto;
+    aspect-ratio: 559 / 240;
+    box-sizing: border-box;
+    overflow: hidden;
+    position: relative;
+    background: transparent;
+    padding: 0;
+  }
+
+  .diagram-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+
+  .mobile-only {
+    display: none;
+  }
+
+  .is-enhanced .reveal-on-scroll {
+    opacity: 0;
+    transform: translateY(12px);
+    transition: opacity 450ms cubic-bezier(0.25, 1, 0.5, 1), transform 450ms cubic-bezier(0.25, 1, 0.5, 1);
+  }
+
+  .is-enhanced .reveal-on-scroll.is-revealed {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @keyframes stroke-dash-progression {
+    0% { stroke-dashoffset: 12; opacity: 0.5; }
+    50% { stroke-dashoffset: 0; opacity: 1; }
+    100% { stroke-dashoffset: -12; opacity: 0.5; }
+  }
+
+  @keyframes opacity-fade {
+    0%, 100% { opacity: 0.3; }
+    50% { opacity: 1; }
+  }
+
+  @keyframes slide-right {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(6px); }
+  }
+
+  @keyframes slide-left {
+    0%, 100% { transform: translateX(0); }
+    50% { transform: translateX(-6px); }
+  }
+
+  .is-enhanced [data-motion-accent="reveal"] {
+    opacity: 0;
+  }
+
+  .is-enhanced .chapter-row.is-playing [data-motion-accent="reveal"] {
+    animation: opacity-fade 3.6s ease-in-out infinite;
+  }
+
+  .is-enhanced .chapter-row.is-playing [data-motion-accent="dash"] {
+    animation: stroke-dash-progression 3.6s ease-in-out infinite;
+  }
+
+  .is-enhanced .chapter-row.is-playing [data-motion-accent="slide-right"] {
+    animation: slide-right 3.6s ease-in-out infinite;
+  }
+
+  .is-enhanced .chapter-row.is-playing [data-motion-accent="slide-left"] {
+    animation: slide-left 3.6s ease-in-out infinite;
+  }
+
+  .closing-cta {
+    text-align: center;
+    padding: 80px 0 100px 0;
+    border-top: 1px solid var(--line);
+    margin-top: 80px;
+  }
+
+  .cta-title {
+    font-size: 32px;
+    font-weight: 700;
+    margin: 0 0 24px 0;
+    color: var(--ink);
+  }
+
+  .cta-actions {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .cta-quiet {
+    margin-top: 16px;
+  }
+
+  .cta-quiet a {
+    color: var(--muted);
+    font-size: 14px;
+    text-decoration: none;
+    transition: color 150ms ease;
+  }
+
+  .cta-quiet a:hover {
+    color: var(--ink);
+    text-decoration: underline;
+  }
+
+  @media (max-width: 900px) {
+    .diagram-surface {
+      width: 100%;
+      max-width: none;
+      height: auto;
+      aspect-ratio: 270 / 220;
+    }
+
+    .landing-shell {
+      padding: 0 24px;
+    }
+
+    .header-inner {
+      padding-left: 24px;
+      padding-right: 24px;
+      width: 100%;
+    }
+
+    .hero {
+      width: 100%;
+      height: auto;
+      padding-top: 48px;
+      padding-bottom: 48px;
+    }
+
+    .display-type {
+      font-size: 32px;
+      line-height: 40px;
+      max-width: 100%;
+      margin-bottom: 16px;
+    }
+
+    .hero-lead {
+      font-size: 18px;
+      line-height: 28px;
+      max-width: 100%;
+      margin-bottom: 24px;
+    }
+
+    .hero-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      width: 100%;
+    }
+
+    .button {
+      width: 100%;
+    }
+
+    .story-intro {
+      padding-top: 32px;
+      margin-bottom: 32px;
+      width: 100%;
+    }
+
+    .story-eyebrow {
+      margin: 0 auto 12px auto;
+    }
+
+    .story-title {
+      font-size: 28px;
+      line-height: 34px;
+      margin-bottom: 12px;
+    }
+
+    .story-lead {
+      font-size: 15px;
+      line-height: 22px;
+      margin-bottom: 32px;
+    }
+
+    .chapter-row, article.chapter-row:nth-of-type(even) {
+      flex-direction: column;
+      height: auto;
+      gap: 24px;
+      margin-bottom: 64px;
+      width: 100%;
+      padding: 0;
+    }
+
+    .chapter-text {
+      width: 100%;
+      order: 1;
+    }
+
+    .chapter-visual {
+      width: 100%;
+      order: 2;
+    }
+
+    .desktop-only {
+      display: none;
+    }
+
+    .mobile-only {
+      display: block;
+    }
+
+    .closing-cta {
+      padding: 48px 0 64px 0;
+      margin-top: 48px;
+    }
+
+    .cta-title {
+      font-size: 24px;
+      margin-bottom: 20px;
+    }
+
+    .cta-actions {
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .is-enhanced .reveal-on-scroll {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+    .is-enhanced .chapter-row.is-playing [data-motion-accent] {
+      animation: none;
+      transform: none;
+    }
+  }
+`;
+
+export default `<!DOCTYPE html>
+<html lang="en">
+${renderHead('Portable graph execution', landingStyles, 'Resolve declarative workflow graphs through explicit cache, execution and result phases.', '/')}
+<body>
+  ${renderHeader('home')}
+  <main id="main-content">
+    <div class="landing-shell">
+
+      <section class="hero" aria-labelledby="hero-title">
+        <h1 id="hero-title" class="display-type">
+          <span class="hero-title-accent">Symbiote Engine</span>
+          <span class="hero-title-thesis">Portable graph execution, made observable.</span>
+        </h1>
+        <p class="hero-lead">Define a portable graph once. At runtime, registered behavior, cache decisions, lifecycle failures, and execution results stay explicit to the host without binding the graph to a product shell.</p>
+        <div class="hero-actions">
+          <a class="button button--primary" href="${routes.docs}">Start with the guide</a>
+          <a class="button" href="${routes.demo}">Run the in-memory demo</a>
+        </div>
+      </section>
+
+      <section class="how-it-works" aria-labelledby="story-title-main">
+        <div class="story-intro">
+          <span class="story-eyebrow"><svg class="story-eyebrow-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="12" r="1.5" fill="currentColor" /><circle cx="12" cy="12" r="1.5" fill="currentColor" /><circle cx="8" cy="4" r="1.5" fill="currentColor" /><path d="M5.2 10.4l1.6-4.8m2.4 0l1.6 4.8" /></svg>How it works</span>
+          <h2 id="story-title-main" class="story-title">One graph. Every branch stays visible.</h2>
+          <p class="story-lead">Graph data meets registered behavior at runtime. Engine resolves cache identity, chooses reuse or execution, and returns lifecycle failures as node-scoped output.</p>
+        </div>
+
+        <article class="chapter-row chapter-01 reveal-on-scroll" aria-label="Chapter 01 Graph shape">
+          <div class="chapter-text">
+            <span class="chapter-num">01 / Graph shape</span>
+            <h3 class="chapter-title">A graph stays portable until the host supplies behavior.</h3>
+            <p class="chapter-desc">JSON carries node types, parameters, and connections. The registry maps those types to behavior at runtime, so graph data remains independent of a product shell.</p>
+          </div>
+          <div class="chapter-visual">
+            <div class="diagram-surface">
+              <svg viewBox="0 0 559 240" class="diagram-svg desktop-only" role="img" aria-label="Graph shape">
+                <path data-visual-object="doc-plane" d="M 50,40 L 350,40 L 390,80 L 390,200 L 50,200 Z M 350,40 L 350,80 L 390,80" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+
+                <path data-visual-object="ports" d="M 120,120 m -20,0 a 20,20 0 1,0 40,0 a 20,20 0 1,0 -40,0 M 220,90 m -20,0 a 20,20 0 1,0 40,0 a 20,20 0 1,0 -40,0 M 320,150 m -20,0 a 20,20 0 1,0 40,0 a 20,20 0 1,0 -40,0" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-visual-object="track" d="M 140,120 C 180,120 180,90 200,90 M 240,90 C 280,90 280,150 300,150" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <text x="55" y="60" fill="var(--ink)" font-size="14" font-family="var(--sans)">graph.json</text>
+                <text x="120" y="160" text-anchor="middle" fill="var(--muted)" font-size="14" font-family="var(--sans)">input</text>
+                <text x="220" y="130" text-anchor="middle" fill="var(--muted)" font-size="14" font-family="var(--sans)">transform</text>
+                <text x="320" y="110" text-anchor="middle" fill="var(--muted)" font-size="14" font-family="var(--sans)">output</text>
+
+                <path data-visual-object="reg-key" d="M 450,110 A 15 15 0 1 0 450,130 L 490,130 L 490,140 L 500,140 L 500,130 L 510,130 L 510,120 Z" fill="none" stroke="var(--mint)" stroke-width="2" />
+                <text x="450" y="90" fill="var(--mint)" font-size="14" font-family="var(--sans)">registry</text>
+
+                <line data-motion-accent="dash" x1="390" y1="120" x2="435" y2="120" stroke="var(--mint)" stroke-width="2" stroke-dasharray="4 4" />
+              </svg>
+              <svg viewBox="0 0 270 220" class="diagram-svg mobile-only" role="img" aria-label="Graph shape">
+                <path data-visual-object="doc-plane" d="M 10,20 L 160,20 L 190,50 L 190,190 L 10,190 Z M 160,20 L 160,50 L 190,50" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+
+                <path data-visual-object="ports" d="M 50,100 m -15,0 a 15,15 0 1,0 30,0 a 15,15 0 1,0 -30,0 M 100,70 m -15,0 a 15,15 0 1,0 30,0 a 15,15 0 1,0 -30,0 M 150,130 m -15,0 a 15,15 0 1,0 30,0 a 15,15 0 1,0 -30,0" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-visual-object="track" d="M 65,100 C 80,100 80,70 85,70 M 115,70 C 130,70 130,130 135,130" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <text x="15" y="40" fill="var(--ink)" font-size="13" font-family="var(--sans)">graph.json</text>
+                <text x="50" y="130" text-anchor="middle" fill="var(--muted)" font-size="13" font-family="var(--sans)">input</text>
+                <text x="100" y="100" text-anchor="middle" fill="var(--muted)" font-size="13" font-family="var(--sans)">transform</text>
+                <text x="150" y="100" text-anchor="middle" fill="var(--muted)" font-size="13" font-family="var(--sans)">output</text>
+
+                <path data-visual-object="reg-key" d="M 220,95 A 10 10 0 1 0 220,105 L 245,105 L 245,110 L 255,110 L 255,105 L 260,105 L 260,95 Z" fill="none" stroke="var(--mint)" stroke-width="2" />
+                <text x="210" y="75" fill="var(--mint)" font-size="13" font-family="var(--sans)">registry</text>
+
+                <line data-motion-accent="dash" x1="190" y1="100" x2="210" y2="100" stroke="var(--mint)" stroke-width="2" stroke-dasharray="4 4" />
+              </svg>
+            </div>
+          </div>
+        </article>
+
+        <article class="chapter-row chapter-02 reveal-on-scroll" aria-label="Chapter 02 Cache identity">
+          <div class="chapter-text">
+            <span class="chapter-num">02 / Cache identity</span>
+            <h3 class="chapter-title">Inputs and parameters become one repeatable identity.</h3>
+            <p class="chapter-desc">For lifecycle-enabled nodes, the default cache key is exactly JSON.stringify({ i: inputs, p: params }). Execution context reaches execute, but it is not part of that default key.</p>
+          </div>
+          <div class="chapter-visual">
+            <div class="diagram-surface">
+              <svg viewBox="0 0 559 240" class="diagram-svg desktop-only" role="img" aria-label="Cache identity">
+                <circle data-visual-object="f1" data-field="inputs" cx="200" cy="120" r="70" fill="var(--line-strong)" fill-opacity="0.1" stroke="var(--line-strong)" stroke-width="2" />
+                <circle data-visual-object="f2" data-field="params" cx="300" cy="120" r="70" fill="var(--brand)" fill-opacity="0.1" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-motion-accent="slide-right" d="M 155,115 A 10 10 0 0 1 155,125" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+                <path data-motion-accent="slide-left" d="M 345,115 A 10 10 0 0 0 345,125" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-visual-object="fingerprint" d="M 235,110 L 235,130 M 242,105 L 242,135 M 249,100 L 249,140 M 256,108 L 256,132 M 263,112 L 263,128" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+                <path data-motion-accent="reveal" d="M 235,110 L 235,130 M 242,105 L 242,135 M 249,100 L 249,140 M 256,108 L 256,132 M 263,112 L 263,128" fill="none" stroke="var(--mint)" stroke-width="2" />
+
+                <text x="160" y="125" text-anchor="middle" fill="var(--ink)" font-size="14" font-family="var(--sans)">inputs</text>
+                <text x="340" y="125" text-anchor="middle" fill="var(--ink)" font-size="14" font-family="var(--sans)">params</text>
+
+                <text x="250" y="90" text-anchor="middle" fill="var(--mint)" font-size="14" font-family="var(--sans)">{ i, p }</text>
+              </svg>
+              <svg viewBox="0 0 270 220" class="diagram-svg mobile-only" role="img" aria-label="Cache identity">
+                <circle data-visual-object="f1" data-field="inputs" cx="95" cy="110" r="50" fill="var(--line-strong)" fill-opacity="0.1" stroke="var(--line-strong)" stroke-width="2" />
+                <circle data-visual-object="f2" data-field="params" cx="175" cy="110" r="50" fill="var(--brand)" fill-opacity="0.1" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-motion-accent="slide-right" d="M 60,105 A 8 8 0 0 1 60,115" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+                <path data-motion-accent="slide-left" d="M 210,105 A 8 8 0 0 0 210,115" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-visual-object="fingerprint" d="M 121,100 L 121,115 M 128,95 L 128,120 M 135,90 L 135,125 M 142,98 L 142,117 M 149,102 L 149,113" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+                <path data-motion-accent="reveal" d="M 121,100 L 121,115 M 128,95 L 128,120 M 135,90 L 135,125 M 142,98 L 142,117 M 149,102 L 149,113" fill="none" stroke="var(--mint)" stroke-width="2" />
+
+                <text x="65" y="115" text-anchor="middle" fill="var(--ink)" font-size="13" font-family="var(--sans)">inputs</text>
+                <text x="205" y="115" text-anchor="middle" fill="var(--ink)" font-size="13" font-family="var(--sans)">params</text>
+
+                <text x="135" y="85" text-anchor="middle" fill="var(--mint)" font-size="13" font-family="var(--sans)">{ i, p }</text>
+              </svg>
+            </div>
+          </div>
+        </article>
+
+        <article class="chapter-row chapter-03 reveal-on-scroll" aria-label="Chapter 03 Cache branch">
+          <div class="chapter-text">
+            <span class="chapter-num">03 / Cache branch</span>
+            <h3 class="chapter-title">Validation comes first; then the cache chooses the path.</h3>
+            <p class="chapter-desc">After validation and key resolution, a matching auto-mode entry returns stored output. A miss executes, may post-process the output, and then stores it under the resolved key.</p>
+          </div>
+          <div class="chapter-visual">
+            <div class="diagram-surface">
+              <svg viewBox="0 0 559 240" class="diagram-svg desktop-only" role="img" aria-label="Cache branch">
+                <path data-visual-object="val" d="M 80,120 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0" fill="none" stroke="var(--ink)" stroke-width="2" />
+                <text x="80" y="145" text-anchor="middle" fill="var(--ink)" font-size="14" font-family="var(--sans)">validate</text>
+
+                <line data-visual-object="line1" x1="90" y1="120" x2="130" y2="120" stroke="var(--line-strong)" stroke-width="2" />
+
+                <path data-visual-object="gate" d="M 140,120 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0" fill="none" stroke="var(--ink)" stroke-width="2" />
+
+                <path data-route="reuse" data-motion-accent="dash" d="M 150,120 C 220,80 360,80 430,120" fill="none" stroke="var(--mint)" stroke-width="2" stroke-dasharray="6 6" />
+                <text x="290" y="55" text-anchor="middle" fill="var(--mint)" font-size="14" font-family="var(--sans)">reuse</text>
+
+                <path data-route="execute" data-motion-accent="dash" d="M 150,120 C 220,215 360,215 430,120" fill="none" stroke="var(--brand)" stroke-width="2" stroke-dasharray="6 6" />
+
+                <text x="230" y="195" text-anchor="middle" fill="var(--ink)" font-size="14" font-family="var(--sans)">execute</text>
+                <text x="290" y="210" text-anchor="middle" fill="var(--ink)" font-size="14" font-family="var(--sans)">postProcess?</text>
+                <text x="350" y="195" text-anchor="middle" fill="var(--ink)" font-size="14" font-family="var(--sans)">store</text>
+
+                <circle data-visual-object="result" cx="440" cy="120" r="10" fill="var(--line-strong)" />
+              </svg>
+              <svg viewBox="0 0 270 220" class="diagram-svg mobile-only" role="img" aria-label="Cache branch">
+                <path data-visual-object="val" d="M 30,110 m -8,0 a 8,8 0 1,0 16,0 a 8,8 0 1,0 -16,0" fill="none" stroke="var(--ink)" stroke-width="2" />
+                <text x="30" y="130" text-anchor="middle" fill="var(--ink)" font-size="13" font-family="var(--sans)">validate</text>
+
+                <line data-visual-object="line1" x1="38" y1="110" x2="62" y2="110" stroke="var(--line-strong)" stroke-width="2" />
+
+                <path data-visual-object="gate" d="M 70,110 m -8,0 a 8,8 0 1,0 16,0 a 8,8 0 1,0 -16,0" fill="none" stroke="var(--ink)" stroke-width="2" />
+
+                <path data-route="reuse" data-motion-accent="dash" d="M 78,110 C 110,80 180,80 212,110" fill="none" stroke="var(--mint)" stroke-width="2" stroke-dasharray="6 6" />
+                <text x="145" y="60" text-anchor="middle" fill="var(--mint)" font-size="13" font-family="var(--sans)">reuse</text>
+
+                <path data-route="execute" data-motion-accent="dash" d="M 78,110 C 110,185 180,185 212,110" fill="none" stroke="var(--brand)" stroke-width="2" stroke-dasharray="6 6" />
+
+                <text x="110" y="170" text-anchor="middle" fill="var(--ink)" font-size="13" font-family="var(--sans)">execute</text>
+                <text x="145" y="185" text-anchor="middle" fill="var(--ink)" font-size="13" font-family="var(--sans)">postProcess?</text>
+                <text x="180" y="170" text-anchor="middle" fill="var(--ink)" font-size="13" font-family="var(--sans)">store</text>
+
+                <circle data-visual-object="result" cx="220" cy="110" r="8" fill="var(--line-strong)" />
+              </svg>
+            </div>
+          </div>
+        </article>
+
+        <article class="chapter-row chapter-04 reveal-on-scroll" aria-label="Chapter 04 Observable outcome">
+          <div class="chapter-text">
+            <span class="chapter-num">04 / Observable outcome</span>
+            <h3 class="chapter-title">A lifecycle failure becomes output, not a hidden stop.</h3>
+            <p class="chapter-desc">Validation, execution, or post-processing errors become node-scoped { _error } output and a structured execution-log record. The traversal loop continues; later nodes still depend on their resolved inputs.</p>
+          </div>
+          <div class="chapter-visual">
+            <div class="diagram-surface">
+              <svg viewBox="0 0 559 240" class="diagram-svg desktop-only" role="img" aria-label="Observable outcome">
+                <path data-visual-object="track" d="M 80,120 C 180,90 380,150 480,120" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+
+                <path data-visual-object="node1" d="M 140,113 m -15,0 a 15,15 0 1,0 30,0 a 15,15 0 1,0 -30,0" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-visual-object="node2" d="M 280,120 m -15,0 a 15,15 0 1,0 30,0 a 15,15 0 1,0 -30,0" fill="none" stroke="var(--danger)" stroke-width="4" />
+                <text x="280" y="100" text-anchor="middle" fill="var(--danger)" font-size="14" font-family="var(--sans)">{ _error }</text>
+
+                <path data-visual-object="node3" d="M 420,127 m -15,0 a 15,15 0 1,0 30,0 a 15,15 0 1,0 -30,0" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-motion-accent="dash" d="M 280,135 L 280,170 L 320,170" fill="none" stroke="var(--danger)" stroke-width="2" stroke-dasharray="4 4" />
+
+                <path data-visual-object="record" d="M 320,160 L 360,160 M 370,160 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 M 320,170 L 380,170 M 390,170 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 M 320,180 L 370,180 M 380,180 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0" fill="none" stroke="var(--ink)" stroke-width="2" />
+                <text x="320" y="200" fill="var(--ink)" font-size="14" font-family="var(--sans)">execution record</text>
+              </svg>
+              <svg viewBox="0 0 270 220" class="diagram-svg mobile-only" role="img" aria-label="Observable outcome">
+                <path data-visual-object="track" d="M 20,100 C 70,80 190,120 250,100" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+
+                <path data-visual-object="node1" d="M 60,95 m -12,0 a 12,12 0 1,0 24,0 a 12,12 0 1,0 -24,0" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-visual-object="node2" d="M 135,100 m -12,0 a 12,12 0 1,0 24,0 a 12,12 0 1,0 -24,0" fill="none" stroke="var(--danger)" stroke-width="4" />
+                <text x="135" y="80" text-anchor="middle" fill="var(--danger)" font-size="13" font-family="var(--sans)">{ _error }</text>
+
+                <path data-visual-object="node3" d="M 210,105 m -12,0 a 12,12 0 1,0 24,0 a 12,12 0 1,0 -24,0" fill="none" stroke="var(--brand)" stroke-width="2" />
+
+                <path data-motion-accent="dash" d="M 135,112 L 135,150 L 160,150" fill="none" stroke="var(--danger)" stroke-width="2" stroke-dasharray="4 4" />
+
+                <path data-visual-object="record" d="M 160,140 L 190,140 M 198,140 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 M 160,150 L 205,150 M 213,150 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0 M 160,160 L 195,160 M 203,160 a 2 2 0 1 0 4 0 a 2 2 0 1 0 -4 0" fill="none" stroke="var(--ink)" stroke-width="2" />
+                <text x="160" y="180" fill="var(--ink)" font-size="13" font-family="var(--sans)">execution record</text>
+              </svg>
+            </div>
+          </div>
+        </article>
+      </section>
+
+      <section class="closing-cta">
+        <h2 class="cta-title">Ready to run a graph?</h2>
+        <div class="cta-actions">
+          <a class="button button--primary" href="${routes.docs}">Start with the guide</a>
+          <a class="button" href="${routes.demo}">Run the demo</a>
+        </div>
+        <p class="cta-quiet">
+          <a href="https://github.com/RND-PRO/symbiote-engine">View source on GitHub</a>
+        </p>
+      </section>
+
+    </div>
+  </main>
+  ${renderFooter()}
+  ${renderScripts()}
+  <script type="module" src="./animation-client.js"></script>
+</body>
+</html>`;

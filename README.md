@@ -202,6 +202,21 @@ a mismatch fails with `RENDER_SEAM_MISMATCH`. Artifacts
 include setup-state and seam evidence alongside duration, throughput, range, and
 warm-up metadata. Realtime capture remains single-worker.
 
+## Documentation Site
+
+- **[Symbiote Engine Landing](https://rnd-pro.github.io/symbiote-engine/)**
+- **[Symbiote Engine Docs](https://rnd-pro.github.io/symbiote-engine/docs/)**
+
+To build the static documentation site locally (requires Node 20+ for JSDA site tooling, while the engine runtime supports Node 18+):
+```sh
+npm install
+npm run site:build
+```
+For local development with live reload:
+```sh
+npm run site:dev
+```
+
 ## License
 
 MIT
