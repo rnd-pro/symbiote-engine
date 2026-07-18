@@ -44,7 +44,7 @@ const content = `
     </p>
 
     <h3>Usage & Syntax</h3>
-    <pre><code># Execute a workflow graph using local handlers
+    <pre><code data-language="bash"># Execute a workflow graph using local handlers
 symbiote-engine run &lt;workflow.json&gt; [--pack video] [--handlers ./custom] [--secrets ./secrets.json] [--verbose] [--json]
 
 # Validate graph definitions (does not perform complete schema validation)
@@ -86,7 +86,7 @@ symbiote-engine serve &lt;workflow.json&gt; [--port 3100] [--handlers ./custom] 
       Because it is not part of the root export, <code>GraphServer</code> must be imported directly from its module path. It requires the <code>ws</code> peer dependency (version 8 or higher) to be resolved in the host environment.
     </p>
 
-    <pre><code>import { createServer } from 'symbiote-engine/GraphServer.js';
+    <pre><code data-language="js">import { createServer } from 'symbiote-engine/GraphServer.js';
 
 const serverInstance = await createServer({
   port: 3100,

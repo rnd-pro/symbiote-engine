@@ -15,11 +15,11 @@ const content = `
     <p>
       Install the package using your preferred package manager. Symbiote Engine requires Node.js version 18 or higher.
     </p>
-    <pre><code>npm install symbiote-engine</code></pre>
+    <pre><code data-language="bash">npm install symbiote-engine</code></pre>
     <p>
       Since the library is published as a pure ES Module (ESM), ensure your project is configured to support ESM. You can do this by setting <code>"type": "module"</code> in your project's <code>package.json</code> file:
     </p>
-    <pre><code>{
+    <pre><code data-language="json">{
   "name": "your-project",
   "type": "module"
 }</code></pre>
@@ -31,7 +31,7 @@ const content = `
       The following executable example shows how to import the required classes, register custom node types, build a simple math pipeline (with nodes that generate and double a value), and execute the graph to yield <code>42</code>.
     </p>
 
-    <pre><code>import { Graph, Executor, registerNodeType } from 'symbiote-engine/browser';
+    <pre><code data-language="js">import { Graph, Executor, registerNodeType } from 'symbiote-engine/browser';
 
 registerNodeType({
   type: 'docs/source',
@@ -60,6 +60,18 @@ graph.connect(source, 'value', double, 'value');
 const result = await new Executor().run(graph);
 console.log(result.outputs[double].result); // 42
 </code></pre>
+
+    <div class="node-preview">
+      <p class="node-preview-heading">The same graph, rendered as nodes</p>
+      <div class="node-preview-stage" data-node-preview>
+        <div class="node-preview-fallback">
+          Source <span aria-hidden="true">→</span> Double
+          <br>
+          <small>Interactive node preview loads from Symbiote UI when available.</small>
+        </div>
+      </div>
+      <p class="node-preview-note">The preview is read-only: the graph model remains owned by this documentation page.</p>
+    </div>
   </section>
 
   <section id="custom-nodes">

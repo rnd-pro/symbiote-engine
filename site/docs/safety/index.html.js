@@ -62,7 +62,7 @@ const content = `
       </tbody>
     </table>
 
-    <pre><code>// Store a non-secret reference
+    <pre><code data-language="js">// Store a non-secret reference
 const referenceParams = {
   voice: 'en-male-1',
   credentialRef: 'voice-provider/primary'
@@ -75,7 +75,7 @@ const referenceParams = {
     <p>
       The library includes a development server for synchronization sessions, which can be imported via:
     </p>
-    <pre><code>import { createServer } from 'symbiote-engine/GraphServer.js';</code></pre>
+    <pre><code data-language="js">import { createServer } from 'symbiote-engine/GraphServer.js';</code></pre>
 
     <p>
       When utilizing this server primitive, hosts must be aware of the following security limitations:

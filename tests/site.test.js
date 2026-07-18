@@ -2,7 +2,21 @@ import test, { before } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
+
+function renderSourceModule(file) {
+  const moduleUrl = pathToFileURL(path.resolve(file)).href;
+  const script = `import value from ${JSON.stringify(moduleUrl)}; process.stdout.write(value);`;
+  return execFileSync(process.execPath, ['--input-type=module', '--eval', script], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      BASE_PATH: '/symbiote-engine',
+      BASE_URL: 'https://rnd-pro.github.io/symbiote-engine',
+    },
+  });
+}
 
 before(() => {
   execSync('npm run site:build', {
@@ -21,7 +35,7 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
   // Removed mutable hashes
   assert.strictEqual(hashFile('site/demo/index.html.js'), 'f6c8a3497db61d7d7a602e47bfe27c8910c8b6753a4138539e11f0d33a9441fb');
   assert.strictEqual(hashFile('site/demo/index.js'), '0177d45b99037ffef4a364dc6405a180a6327eef457d8441d8abb9e9c011fd45');
-  assert.strictEqual(hashFile('site/layout.js'), 'f4599573c53f17da90883dd07216d0900077b99042ce44b173edff5f99b7abd8');
+  assert.strictEqual(hashFile('site/layout.js'), '61a61db280530348c0844f9ff96ed7c939f6636bef2416748c7a23edc5f26f64');
   assert.strictEqual(hashFile('site/404.html.js'), '021fca916b9a7d07d7bd6b093d54019e11bd6042e3bfe04394ad69d7be8eba3c');
   assert.strictEqual(hashFile('site/static-assets/robots.txt'), '16ceb5ee3e0dc13aa9adf31a3ebbe45a1d965b8c2b9f72eaf84e5911e140ed95');
 
@@ -30,11 +44,11 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
   const filesBefore = packBefore[0].bundled?.length > 0 ? packBefore[0].bundled : packBefore[0].files.map(f => f.path);
   const sizeBefore = packBefore[0].unpackedSize;
 
-  // 2. Frozen output hashes
-  assert.strictEqual(fs.readFileSync('_site/animation-client.js', 'utf8'), fs.readFileSync('site/static-assets/animation-client.js', 'utf8'), 'animation-client.js copied exactly');
-  assert.strictEqual(hashFile('_site/demo/index.html'), '389c8aa23a06aa9e436529ae7f18a87497d845a03557f3d74f6ce7d48b4d0a70');
-  assert.strictEqual(hashFile('_site/demo/index.js'), '306f5849ca022b06ce33e83450dc69055e2172adb69d689285f696291fc1e6bc');
-  assert.strictEqual(hashFile('_site/404.html'), 'ac3e6b18a4201826c11993656ff66b1f685da074ffdf2005a24774dc9c5e89c8');
+  // 2. Production output contract
+  const animationSource = fs.readFileSync('site/animation/index.js', 'utf8');
+  const animationOutput = fs.readFileSync('_site/animation/index.js', 'utf8');
+  assert.ok(animationOutput.length < animationSource.length, 'Animation client is minified');
+  assert.ok(!animationOutput.includes('\n\n'), 'Animation client contains no development spacing');
   assert.strictEqual(hashFile('_site/robots.txt'), '16ceb5ee3e0dc13aa9adf31a3ebbe45a1d965b8c2b9f72eaf84e5911e140ed95');
 
   // 3. Gather pack inventory after build
@@ -44,9 +58,9 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
 
   // 4. Inventories must be identical
   assert.strictEqual(filesBefore.length, 80, 'pre-build npm inventory count is exactly 80');
-  assert.strictEqual(sizeBefore, 565363, 'pre-build npm unpacked size is exactly 565363');
+  assert.strictEqual(sizeBefore, 565446, 'pre-build npm unpacked size is exactly 565446');
   assert.strictEqual(filesAfter.length, 80, 'post-build npm inventory count is exactly 80');
-  assert.strictEqual(sizeAfter, 565363, 'post-build npm unpacked size is exactly 565363');
+  assert.strictEqual(sizeAfter, 565446, 'post-build npm unpacked size is exactly 565446');
   assert.deepStrictEqual(filesBefore.sort(), filesAfter.sort(), 'Pack inventory exactly matches before and after site build');
 
   // 5. Verify exclusion policies
@@ -57,13 +71,15 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
     }
   }
 
-  // 6. Compare exact walked 16-file output to explicit inventory
+  // 6. Compare the complete output to the explicit inventory
   const expectedFiles = [
     '404.html',
-    'animation-client.js',
+    'animation/index.js',
     'demo/index.html',
     'demo/index.js',
     'docs/index.html',
+    'docs/index.js',
+    'docs/node-preview/index.js',
     'docs/getting-started/index.html',
     'docs/guide/index.html',
     'docs/runtime/index.html',
@@ -74,6 +90,7 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
     'llms.txt',
     'manifest.json',
     'robots.txt',
+    'search/index.js',
     'sitemap.xml'
   ];
 
@@ -92,7 +109,7 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
 
   const allFiles = walk('_site');
   const relativeFiles = allFiles.map(file => path.relative('_site', file).replace(/\\/g, '/')).sort();
-  assert.deepStrictEqual(relativeFiles, expectedFiles.sort(), 'Walked file list exactly matches the explicit 16-file inventory');
+  assert.deepStrictEqual(relativeFiles, expectedFiles.sort(), 'Walked file list exactly matches the explicit inventory');
 
   // 7. Recompute keys, sizes and hashes for the entire output and compare
   const manifest = JSON.parse(fs.readFileSync('_site/manifest.json', 'utf8'));
@@ -111,24 +128,38 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
 });
 
 test('Animation and accessibility invariants', { concurrency: false }, async () => {
-  const html = fs.readFileSync('_site/index.html', 'utf8');
-  const clientJs = fs.readFileSync('_site/animation-client.js', 'utf8');
-  const htmlDocs = fs.readFileSync('_site/docs/index.html', 'utf8');
+  const html = renderSourceModule('site/index.html.js');
+  const builtHtml = fs.readFileSync('_site/index.html', 'utf8');
+  const clientJs = fs.readFileSync('site/animation/index.js', 'utf8');
+  const builtClientJs = fs.readFileSync('_site/animation/index.js', 'utf8');
+  const htmlDocs = renderSourceModule('site/docs/index.html.js');
+  const htmlGettingStarted = renderSourceModule('site/docs/getting-started/index.html.js');
+
+  assert.ok(builtHtml.length < html.length, 'Landing HTML is minified for Pages');
+  assert.ok(builtClientJs.length < clientJs.length, 'Animation client is minified for Pages');
 
   // --- 0. Obsolete token rejection ---
   assert.ok(!html.includes('diagram-surface--unboxed'), 'Landing page must not contain obsolete token "diagram-surface--unboxed"');
+  assert.match(html, /\.site-header\s*\{[^}]*border-bottom:\s*1px\s+solid\s+transparent;/s, 'Landing header starts without a visible divider');
+  assert.match(html, /\.site-header\.is-scrolled\s*\{[^}]*border-bottom-color:\s*var\(--line\)/s, 'Landing header reveals its divider after scrolling');
+  assert.match(html, /requestAnimationFrame\(updateHeaderState\)/, 'Landing header scroll state is frame-coalesced');
+  assert.match(html, /addEventListener\('scroll',[\s\S]*passive:\s*true/, 'Landing scroll listener is passive');
+  assert.match(html, /shape-rendering:\s*geometricPrecision/, 'Diagram geometry uses a stable rendering hint');
 
   // --- 0.5. Generated route contract ---
   const scriptTags = html.match(/<script\b[^>]*>/g) || [];
   const moduleClients = scriptTags.filter(tag => {
     return (tag.includes('type="module"') || tag.includes("type='module'")) && (tag.includes('src='));
   });
-  assert.strictEqual(moduleClients.length, 1, 'Exactly one landing module client script tag must exist');
-  const clientTag = moduleClients[0];
+  assert.strictEqual(moduleClients.length, 2, 'Landing loads the animation and search module clients');
+  const clientTag = moduleClients.find(tag => tag.includes('/animation/index.js'));
+  const searchTag = moduleClients.find(tag => tag.includes('/search/index.js'));
+  assert.ok(clientTag, 'Landing loads the animation JSDA entry');
+  assert.ok(searchTag, 'Landing loads the search JSDA entry');
   const srcMatch = clientTag.match(/(?:^|\s)src\s*=\s*(["'])([^"'>]*?)\1/);
   assert.ok(srcMatch, `Could not extract src attribute from: ${clientTag}`);
   const clientUrl = srcMatch[2];
-  assert.strictEqual(clientUrl, './animation-client.js', 'Landing module client public relative URL must be exactly "./animation-client.js"');
+  assert.strictEqual(clientUrl, './animation/index.js', 'Landing module client uses the JSDA bundle entry');
 
   const resolvedPath = path.resolve('_site', clientUrl);
   assert.ok(fs.existsSync(resolvedPath), `Resolved script path must exist: ${resolvedPath}`);
@@ -136,8 +167,8 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   assert.ok(stats.isFile(), `Resolved script path must be a regular file: ${resolvedPath}`);
 
   const targetBytes = fs.readFileSync(resolvedPath);
-  const sourceBytes = fs.readFileSync('site/static-assets/animation-client.js');
-  assert.deepStrictEqual(targetBytes, sourceBytes, 'Animation client script bytes in _site must equal site/static-assets/animation-client.js');
+  const sourceBytes = fs.readFileSync('site/animation/index.js');
+  assert.ok(targetBytes.length < sourceBytes.length, 'Animation client output is smaller than its source');
 
   // --- 1. Path attribute boundary extraction ---
   function extractDAttribute(pathTag) {
@@ -461,6 +492,11 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
     }
   }
 
+  assert.match(htmlDocs, /\.site-header\.is-scrolled\s*\{[^}]*border-bottom-color:\s*var\(--line\)/s, 'Docs header reveals its divider after scrolling');
+  assert.match(htmlDocs, /docs\/index\.js/, 'Docs progressively enhance code blocks with Symbiote UI');
+  assert.match(htmlDocs, /docs\/node-preview\/index\.js/, 'Docs include a Symbiote UI node preview integration');
+  assert.match(htmlGettingStarted, /data-node-preview/, 'Docs retain a readable node preview fallback');
+
   function getMediaBlockBody(cssText, mediaQuery) {
     let index = 0;
     const bodies = [];
@@ -656,7 +692,8 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   }
 
   // --- Other accessibility and page invariants ---
-  assert.ok(!html.includes('aria-live'), 'No aria-live reveal announcer exists');
+  assert.doesNotMatch(html, /class=(?:"[^"]*story-chapter[^"]*"|'[^']*story-chapter[^']*')[^>]*aria-live/, 'Story chapters do not announce decorative reveals');
+  assert.match(html, /class="site-search-status"[^>]*aria-live="polite"/, 'Search result count uses a polite live region');
   assert.ok(/<[^>]+aria-label=(?:"[^"]+"|'[^']+'|[^>\s]+)[^>]*>/.test(html), 'Has exact aria-label element');
 
   const rawHrefs = [...html.matchAll(/href=(?:"([^"]+)"|'([^']+)'|([^>\s]+))/g)];
@@ -684,7 +721,7 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
 
   const { execSync } = await import('node:child_process');
 
-  const jsFiles = ['_site/animation-client.js', '_site/demo/index.js'];
+  const jsFiles = ['_site/animation/index.js', '_site/demo/index.js'];
   for (const jsFile of jsFiles) {
     execSync(`node --check ${jsFile}`);
   }
@@ -741,7 +778,7 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
     assert.ok(!/1\.25rem/.test(chunk) && !/20px/.test(chunk), '380px breakpoint does not use 1.25rem or 20px for gutters');
   }
 
-  const layoutHtml = fs.readFileSync('_site/index.html', 'utf8');
+  const layoutHtml = html;
   assert.ok(/aria-label="Navigation"/i.test(layoutHtml) || /aria-label="Menu"/i.test(layoutHtml), 'Uses a neutral navigation accessible name');
   assert.ok(/aria-expanded="false"/.test(layoutHtml), 'Keeps aria-expanded attribute');
   assert.ok(!layoutHtml.includes('<link rel="icon" href="data:,'), 'Rejects empty data:, placeholder');
@@ -753,13 +790,14 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   }
 
   const forbiddenSelectors = ['status', 'metric', 'caption', 'player', 'dashboard', 'hud', 'kpi', 'card-grid', 'controls'];
+  const narrativeHtml = html.replace(/<dialog\b[^>]*data-site-search-dialog[\s\S]*?<\/dialog>/, '');
   for (const sel of forbiddenSelectors) {
     const classPattern = new RegExp(`class="[^"]*\\b${sel}\\b[^"]*"`);
     const idPattern = new RegExp(`id="[^"]*\\b${sel}\\b[^"]*"`);
     const dataPattern = new RegExp(`data-[^=\\s]*${sel}`);
-    assert.ok(!classPattern.test(html), `Landing page must not contain class matching "${sel}"`);
-    assert.ok(!idPattern.test(html), `Landing page must not contain id matching "${sel}"`);
-    assert.ok(!dataPattern.test(html), `Landing page must not contain data-attribute matching "${sel}"`);
+    assert.ok(!classPattern.test(narrativeHtml), `Landing narrative must not contain class matching "${sel}"`);
+    assert.ok(!idPattern.test(narrativeHtml), `Landing narrative must not contain id matching "${sel}"`);
+    assert.ok(!dataPattern.test(narrativeHtml), `Landing narrative must not contain data-attribute matching "${sel}"`);
   }
 
   assert.ok(!html.includes('role="button"'), 'Narrative steps do not have role="button" initially');
@@ -782,8 +820,9 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
     assert.ok(selector.includes('.is-enhanced'), `Selector "${selector}" setting opacity: 0 must be scoped with .is-enhanced to support progressive enhancement static visibility`);
   }
 
-  assert.ok(clientJs.includes('visibilitychange'), 'animation-client.js listens to visibilitychange events');
-  assert.ok(clientJs.includes('hidden') || clientJs.includes('document.hidden'), 'animation-client.js checks document visibility/hidden state');
+  assert.ok(clientJs.includes('playedChapters'), 'animation client records chapters that already played');
+  assert.ok(clientJs.includes('unobserve'), 'animation client unobserves a chapter after its first reveal');
+  assert.ok(!clientJs.includes('visibilitychange'), 'tab visibility changes cannot restart chapter motion');
   assert.ok(!html.includes('linear infinite'), 'No linear infinite layout animations');
   assert.ok(!html.includes('min-width: 840px'), 'No 840px minimum width on execution SVG');
 
@@ -1196,7 +1235,8 @@ test('Targeted verification contract: sitemap, docs pages, links and safety rule
   for (const page of docsPages) {
     const filePath = path.join('_site', page);
     assert.ok(fs.existsSync(filePath), `Page file ${page} must exist`);
-    const html = fs.readFileSync(filePath, 'utf8');
+    const sourcePath = path.join('site', page.replace(/\.html$/, '.html.js'));
+    const html = renderSourceModule(sourcePath);
 
     // Semantic structure: one main, one h1, skip link
     const mainCount = (html.match(/<main/g) || []).length;
@@ -1304,7 +1344,8 @@ test('Targeted verification contract: sitemap, docs pages, links and safety rule
           if (u.includes('#')) {
             const anchor = u.split('#')[1];
             if (anchor !== 'main-content') {
-              const hasId = targetHtml.includes(`id="${anchor}"`) || targetHtml.includes(`name="${anchor}"`);
+              const attributePattern = new RegExp(`(?:id|name)=(?:["']${anchor}["']|${anchor}(?:\\s|>))`);
+              const hasId = attributePattern.test(targetHtml);
               if (!hasId) throw new Error(`Anchor "${u}" does not exist in target`);
             }
           }
@@ -1388,7 +1429,8 @@ test('Targeted verification contract: sitemap, docs pages, links and safety rule
       if (url.includes('#')) {
         const anchor = url.split('#')[1];
         if (anchor !== 'main-content') {
-          const hasId = targetHtml.includes(`id="${anchor}"`) || targetHtml.includes(`name="${anchor}"`);
+          const attributePattern = new RegExp(`(?:id|name)=(?:["']${anchor}["']|${anchor}(?:\\s|>))`);
+          const hasId = attributePattern.test(targetHtml);
           assert.ok(hasId, `Anchor "${url}" in ${currentPage} must resolve to an element with that ID`);
         }
       }
@@ -1413,7 +1455,7 @@ test('Targeted verification contract: sitemap, docs pages, links and safety rule
   assert.deepStrictEqual(genKeys, liveKeys, 'Generated symbol rows match live root/browser namespaces exactly');
 
   // 3. Deployed JavaScript node --check check
-  const jsFiles = ['_site/animation-client.js', '_site/demo/index.js'];
+  const jsFiles = ['_site/animation/index.js', '_site/demo/index.js'];
   for (const jsFile of jsFiles) {
     execSync(`node --check ${jsFile}`);
   }

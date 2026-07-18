@@ -75,7 +75,7 @@ const content = `
     <p>
       The default cache key is computed by stringifying the node's current inputs and parameters:
     </p>
-    <pre><code>// Default cache key generation
+    <pre><code data-language="js">// Default cache key generation
 JSON.stringify({ i: inputs, p: params })</code></pre>
     <p>
       Note that this default generation is a direct, un-hashed stringification. It is not canonicalized or sorted.
@@ -110,7 +110,7 @@ JSON.stringify({ i: inputs, p: params })</code></pre>
     <p>
       The <code>GraphHistory</code> utility manages workflow revision history (up to 50 snapshots) for undo/redo actions:
     </p>
-    <pre><code>import { Graph, GraphHistory } from 'symbiote-engine/browser';
+    <pre><code data-language="js">import { Graph, GraphHistory } from 'symbiote-engine/browser';
 
 const graph = new Graph();
 const history = new GraphHistory();

@@ -1,4 +1,5 @@
 import { getCanonicalPath, getCanonicalUrl } from '../url.js';
+import { renderSearchDialog, renderSearchScript, renderSearchStyles } from '../search.js';
 import { docsRoutes } from './routes.js';
 
 const topRoutes = {
@@ -47,6 +48,26 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
     'Reference': 'Reference & Safety',
     'Safety': 'Reference & Safety'
   };
+
+  const currentIndex = docsRoutes.findIndex(r => r.path === activeRoute);
+  const prevRoute = currentIndex > 0 ? docsRoutes[currentIndex - 1] : null;
+  const nextRoute = currentIndex !== -1 && currentIndex < docsRoutes.length - 1 ? docsRoutes[currentIndex + 1] : null;
+  const docsClientPath = activeRoute === '/docs/getting-started/'
+    ? '/docs/node-preview/index.js'
+    : '/docs/index.js';
+
+  const pagerHtml = currentIndex !== -1 ? `
+    <div class="docs-pager">
+      ${prevRoute ? `<a href="${getCanonicalPath(prevRoute.path)}" class="pager-prev">
+        <span class="pager-label">Previous</span>
+        <span class="pager-title">${prevRoute.title}</span>
+      </a>` : '<div></div>'}
+      ${nextRoute ? `<a href="${getCanonicalPath(nextRoute.path)}" class="pager-next">
+        <span class="pager-label">Next</span>
+        <span class="pager-title">${nextRoute.title}</span>
+      </a>` : '<div></div>'}
+    </div>
+  ` : '';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -101,6 +122,22 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
       --nav-link-color: var(--muted);
       --accent-border: var(--brand);
       --font-mono: var(--mono);
+
+      --sn-sys-surface: var(--surface);
+      --sn-sys-on-surface: var(--ink);
+      --sn-sys-border: var(--line);
+      --sn-sys-accent: var(--brand);
+      --sn-sys-accent-soft: var(--brand-soft);
+      --sn-sys-focus: var(--focus);
+      --sn-sys-outline: var(--line);
+      --sn-syntax-keyword: var(--brand);
+      --sn-syntax-string: var(--mint);
+      --sn-syntax-comment: var(--muted);
+      --sn-syntax-function: var(--ink);
+      --sn-syntax-number: var(--amber);
+      --sn-syntax-builtin: var(--brand);
+      --sn-syntax-property: var(--ink);
+      --sn-syntax-literal: var(--mint);
     }
 
     :root[data-theme="dark"] {
@@ -124,6 +161,22 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
       --focus: #8192ff;
       --shadow: none;
       --shadow-small: none;
+
+      --sn-sys-surface: var(--surface);
+      --sn-sys-on-surface: var(--ink);
+      --sn-sys-border: var(--line);
+      --sn-sys-accent: var(--brand);
+      --sn-sys-accent-soft: var(--brand-soft);
+      --sn-sys-focus: var(--focus);
+      --sn-sys-outline: var(--line);
+      --sn-syntax-keyword: var(--brand);
+      --sn-syntax-string: var(--mint);
+      --sn-syntax-comment: var(--muted);
+      --sn-syntax-function: var(--ink);
+      --sn-syntax-number: var(--amber);
+      --sn-syntax-builtin: var(--brand);
+      --sn-syntax-property: var(--ink);
+      --sn-syntax-literal: var(--mint);
     }
 
     *, *::before, *::after { box-sizing: border-box; }
@@ -163,11 +216,13 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
       position: sticky;
       top: 0;
       z-index: 50;
-      border-bottom: 1px solid var(--line);
+      border-bottom: 1px solid transparent;
       background: var(--page);
       height: 64px;
       box-sizing: border-box;
+      transition: border-bottom-color 160ms ease;
     }
+    .site-header.is-scrolled { border-bottom-color: var(--line); }
     .header-inner {
       width: min(1152px, calc(100% - 48px));
       height: 64px;
@@ -196,6 +251,34 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
     .brand-label {
       font-size: 1.05rem;
       letter-spacing: -0.01em;
+    }
+    .header-search {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.55rem;
+      min-width: 8.8rem;
+      height: 2.5rem;
+      margin-right: auto;
+      padding: 0 0.8rem;
+      border: 0;
+      border-radius: 0.8rem;
+      background: var(--surface-soft);
+      color: var(--muted);
+      cursor: pointer;
+      text-decoration: none;
+    }
+    .header-search:hover { color: var(--ink); }
+    .header-search-icon { width: 1.15rem; height: 1.15rem; flex: 0 0 auto; }
+    .header-search-label { font-size: 0.95rem; }
+    .header-search kbd {
+      margin-left: auto;
+      padding: 0.08rem 0.38rem;
+      border: 1px solid var(--line);
+      border-radius: 0.38rem;
+      background: var(--page);
+      color: var(--muted);
+      font-size: 0.72rem;
+      line-height: 1.35;
     }
     .header-actions { display: flex; align-items: center; gap: 1.5rem; }
     .site-nav { display: flex; align-items: center; gap: 1rem; }
@@ -235,7 +318,6 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
 
     .docs-container {
       display: grid;
-      grid-template-columns: 250px minmax(0, 1fr);
       gap: 2.5rem;
       margin-top: 1rem;
       align-items: start;
@@ -247,7 +329,6 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
     .docs-sidebar {
       grid-column: 1;
       grid-row: 1 / 3;
-      width: 250px;
       flex-shrink: 0;
       position: sticky;
       top: 5rem;
@@ -362,14 +443,151 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
     pre {
       max-width: 100%;
       overflow-x: auto;
-      padding: 1.1rem 1.2rem;
+      margin: 1.75rem 0 2rem;
+      padding: 1rem 1.15rem;
       border: 1px solid var(--line);
-      border-radius: 0.8rem;
+      border-radius: 0.65rem;
       background: var(--surface);
       color: var(--ink);
       line-height: 1.55;
     }
     pre code { font-size: 0.86rem; }
+
+    .code-block-wrapper {
+      margin: 1.75rem 0 2rem;
+      border: 1px solid var(--line);
+      border-radius: 0.65rem;
+      background: var(--surface);
+      overflow: hidden;
+    }
+    .code-block-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 1rem;
+      border-bottom: 1px solid var(--line);
+      background: var(--surface-soft);
+      font-family: var(--sans);
+    }
+    .code-block-lang {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .code-block-copy {
+      font-size: 0.75rem;
+      background: none;
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 0.2rem 0.5rem;
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 150ms ease;
+    }
+    .code-block-copy:hover {
+      color: var(--ink);
+      border-color: var(--line-strong);
+    }
+
+    .docs-code-enhanced {
+      display: block;
+      margin: 0;
+      max-width: 100%;
+      --cb-bg: transparent;
+      --cb-border: transparent;
+      --cb-fg: var(--ink);
+    }
+    .docs-code-enhanced[hidden] { display: none; }
+    code-block.docs-code-enhanced .cb-gutter { display: none; }
+    code-block.docs-code-enhanced .cb-pre {
+      margin: 0;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+    }
+
+    .docs-pager {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin-top: 4rem;
+      padding-top: 2rem;
+      border-top: 1px solid var(--line);
+    }
+    .docs-pager a {
+      display: flex;
+      flex-direction: column;
+      padding: 1rem;
+      border: 1px solid var(--line);
+      border-radius: 0.65rem;
+      text-decoration: none;
+      transition: border-color 150ms ease;
+    }
+    .docs-pager a:hover {
+      border-color: var(--brand);
+    }
+    .pager-prev { align-items: flex-start; text-align: left; }
+    .pager-next { align-items: flex-end; text-align: right; }
+    .pager-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 0.25rem;
+    }
+    .pager-title {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--brand);
+    }
+
+    .node-preview {
+      margin: 2.25rem 0 2.5rem;
+    }
+    .node-preview-heading {
+      margin: 0 0 0.75rem;
+      color: var(--muted);
+      font-size: 0.88rem;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+    }
+    .node-preview-stage {
+      min-height: 270px;
+      overflow: hidden;
+    }
+    .node-preview-stage node-canvas {
+      display: block;
+      width: 100%;
+      height: 270px;
+      --sn-node-min-width: 180px;
+      --sn-node-max-width: 220px;
+      --sn-sys-surface: var(--surface);
+      --sn-grid-dot: var(--line-strong);
+      --sn-accent-color: var(--brand);
+      --sn-conn-color: var(--brand);
+    }
+    .node-preview-stage .material-symbols-outlined {
+      font-size: 0;
+      line-height: 0;
+    }
+    .node-preview-fallback {
+      display: grid;
+      min-height: 270px;
+      place-items: center;
+      padding: 2rem;
+      color: var(--muted);
+      text-align: center;
+    }
+    .node-preview.is-ready .node-preview-fallback { display: none; }
+    .node-preview-note {
+      margin: 0.75rem 0 0;
+      color: var(--muted);
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
 
     table {
       width: 100%;
@@ -416,6 +634,8 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
     .footer-inner p { margin: 0; max-width: 38rem; }
 
     @media (max-width: 900px) {
+      .header-repository,
+      .is-shell-enhanced [data-theme-toggle] { display: none; }
       .content-shell {
         padding: 0 0 3.5rem 0;
       }
@@ -586,6 +806,8 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
     @media (max-width: 760px) {
       .header-inner { min-height: 4rem; height: auto; }
       .brand-label { max-width: 9.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .header-search { min-width: 0; width: 2.5rem; padding: 0; justify-content: center; }
+      .header-search-label, .header-search kbd { display: none; }
       html:not(.is-shell-enhanced) .header-inner { flex-wrap: wrap; padding: 0.65rem 0; }
       html:not(.is-shell-enhanced) .header-actions { width: 100%; }
       html:not(.is-shell-enhanced) .site-nav {
@@ -613,13 +835,14 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
     }
     @media (max-width: 380px) {
       .header-inner, .content-shell, .footer-inner { width: min(100% - 48px, 1152px); }
-      .brand-label { max-width: 7.8rem; }
+      .brand-label { max-width: none; }
       .header-actions { gap: 0.35rem; }
     }
     @media (prefers-reduced-motion: reduce) {
       html { scroll-behavior: auto; }
       *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
     }
+    ${renderSearchStyles()}
   </style>
 </head>
 <body>
@@ -634,13 +857,20 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
         </svg>
         <span class="brand-label">Symbiote Engine</span>
       </a>
+      <button class="header-search" type="button" data-search-open aria-haspopup="dialog" aria-controls="site-search-dialog" aria-label="Search documentation" title="Search documentation">
+        <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.5 4.5"></path>
+        </svg>
+        <span class="header-search-label">Search</span>
+        <kbd aria-hidden="true">⌘ K</kbd>
+      </button>
       <div class="header-actions">
         <nav class="site-nav" id="site-navigation" aria-label="Primary navigation">
           ${navLink('home', 'Overview', 'docs')}
           ${navLink('docs', 'Guide & Reference', 'docs')}
           ${navLink('demo', 'Demo', 'docs')}
         </nav>
-        <a class="icon-button" href="https://github.com/RND-PRO/symbiote-engine" target="_blank" rel="noopener" aria-label="GitHub Repository" title="GitHub Repository">
+        <a class="icon-button header-repository" href="https://github.com/RND-PRO/symbiote-engine" target="_blank" rel="noopener" aria-label="GitHub Repository" title="GitHub Repository">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: block;">
             <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
           </svg>
@@ -649,7 +879,7 @@ export function renderDocsPage({ title, description, canonicalPath, activeRoute,
         <button class="icon-button nav-toggle" type="button" data-nav-toggle aria-controls="site-navigation" aria-expanded="false" aria-label="Navigation">☰</button>
       </div>
     </div>
-  </header>
+  </header>${renderSearchDialog()}
 
   <main id="main-content" class="content-shell">
     <div class="docs-container">
@@ -675,6 +905,7 @@ ${routes.map(route => `              <li><a href="${getCanonicalPath(route.path)
 
       <div class="docs-content">
         ${content}
+        ${pagerHtml}
       </div>
 
       ${renderOnThisPage(content)}
@@ -691,6 +922,7 @@ ${routes.map(route => `              <li><a href="${getCanonicalPath(route.path)
   <script>
     (() => {
       const root = document.documentElement;
+      const header = document.querySelector('.site-header');
       const themeButton = document.querySelector('[data-theme-toggle]');
       const navButton = document.querySelector('[data-nav-toggle]');
       const navigation = document.getElementById('site-navigation');
@@ -708,6 +940,17 @@ ${routes.map(route => `              <li><a href="${getCanonicalPath(route.path)
         updateThemeLabel();
       });
       updateThemeLabel();
+
+      let scrollFrame = 0;
+      const updateHeaderState = () => {
+        scrollFrame = 0;
+        header?.classList.toggle('is-scrolled', window.scrollY > 8);
+      };
+      const onScroll = () => {
+        if (scrollFrame === 0) scrollFrame = requestAnimationFrame(updateHeaderState);
+      };
+      updateHeaderState();
+      window.addEventListener('scroll', onScroll, { passive: true });
 
       const closeNavigation = () => {
         navigation?.classList.remove('is-open');
@@ -738,8 +981,103 @@ ${routes.map(route => `              <li><a href="${getCanonicalPath(route.path)
         handleResize();
         window.addEventListener('resize', handleResize);
       }
+
+      const codeBlocks = [...document.querySelectorAll('.docs-content pre > code')];
+      const enhanceCodeBlocks = async () => {
+        if (codeBlocks.length === 0) return;
+        try {
+          await customElements.whenDefined('code-block');
+          for (const code of codeBlocks) {
+            const fallback = code.closest('pre');
+            if (!fallback || !fallback.isConnected) continue;
+
+            const lang = code.getAttribute('data-language') || 'js';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'code-block-wrapper';
+
+            const header = document.createElement('div');
+            header.className = 'code-block-header';
+
+            const langSpan = document.createElement('span');
+            langSpan.className = 'code-block-lang';
+            langSpan.textContent = lang;
+
+            const copyBtn = document.createElement('button');
+            copyBtn.type = 'button';
+            copyBtn.className = 'code-block-copy';
+            copyBtn.textContent = 'Copy';
+            copyBtn.setAttribute('aria-live', 'polite');
+            let copyTimeout;
+            copyBtn.onclick = async () => {
+              try {
+                await navigator.clipboard.writeText(code.textContent);
+                copyBtn.textContent = 'Copied';
+              } catch {
+                copyBtn.textContent = 'Copy failed';
+              }
+              clearTimeout(copyTimeout);
+              copyTimeout = setTimeout(() => {
+                copyBtn.textContent = 'Copy';
+              }, 2000);
+            };
+
+            header.append(langSpan, copyBtn);
+
+            const enhanced = document.createElement('code-block');
+            enhanced.className = 'docs-code-enhanced';
+
+            wrapper.append(header, enhanced);
+            fallback.replaceWith(wrapper);
+
+            try {
+              enhanced.setContent(code.textContent, lang);
+            } catch (error) {
+              wrapper.replaceWith(fallback);
+              throw error;
+            }
+          }
+        } catch {
+          // The semantic pre/code fallback remains visible when the optional component is unavailable.
+        }
+      };
+      enhanceCodeBlocks();
+
+      const nodePreview = document.querySelector('[data-node-preview]');
+      if (nodePreview) {
+        const previewRoot = nodePreview.closest('.node-preview');
+        const fallback = nodePreview.querySelector('.node-preview-fallback');
+        const enhanceNodePreview = async () => {
+          try {
+            await import('${getCanonicalPath('/docs/node-preview/index.js')}');
+            await customElements.whenDefined('node-canvas');
+            const canvas = document.createElement('node-canvas');
+            canvas.setAttribute('data-readonly', '');
+            nodePreview.append(canvas);
+            canvas.setChrome(false);
+            canvas.setPanels(false);
+            canvas.setViewportLocked(true);
+            canvas.setEditorModel({
+              readonly: true,
+              nodes: [
+                { id: 'source', type: 'docs/source', name: 'Source', outputs: [{ name: 'value', type: 'number', label: 'value' }] },
+                { id: 'double', type: 'docs/double', name: 'Double', inputs: [{ name: 'value', type: 'number', label: 'value' }], outputs: [{ name: 'result', type: 'number', label: 'result' }] },
+              ],
+              connections: [{ id: 'source-to-double', from: 'source', out: 'value', to: 'double', in: 'value' }],
+              positions: { source: [48, 74], double: { x: 300, y: 74 } },
+            });
+            await new Promise((resolve) => requestAnimationFrame(resolve));
+            canvas.flyToNodes(['source', 'double'], { padding: 28, minZoom: 0.9, maxZoom: 1.15, select: false });
+            previewRoot?.classList.add('is-ready');
+            fallback?.setAttribute('hidden', '');
+          } catch {
+            // Keep the static fallback as the source of truth if the optional component cannot load.
+          }
+        };
+        enhanceNodePreview();
+      }
     })();
   </script>
+  <script type="module" src="${getCanonicalPath(docsClientPath)}"></script>${renderSearchScript()}
 </body>
 </html>`;
 }

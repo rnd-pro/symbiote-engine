@@ -1,4 +1,5 @@
 import { getCanonicalPath, getCanonicalUrl } from './url.js';
+import { renderSearchDialog, renderSearchScript, renderSearchStyles } from './search.js';
 
 const routes = {
   home: getCanonicalPath('/'),
@@ -133,11 +134,13 @@ export function renderHead(
         position: sticky;
         top: 0;
         z-index: 50;
-        border-bottom: 1px solid var(--line);
+        border-bottom: 1px solid transparent;
         background: var(--page);
         height: 64px;
         box-sizing: border-box;
+        transition: border-bottom-color 160ms ease;
       }
+      .site-header.is-scrolled { border-bottom-color: var(--line); }
       .header-inner {
         width: min(1216px, calc(100% - 4rem));
         height: 64px;
@@ -175,9 +178,11 @@ export function renderHead(
         height: 2.5rem;
         margin-right: auto;
         padding: 0 0.8rem;
+        border: 0;
         border-radius: 0.8rem;
         background: var(--surface-soft);
         color: var(--muted);
+        cursor: pointer;
         text-decoration: none;
       }
       .header-search:hover { color: var(--ink); }
@@ -295,6 +300,8 @@ export function renderHead(
       .footer-inner p { margin: 0; max-width: 38rem; }
 
       @media (max-width: 760px) {
+        .header-repository,
+        .is-shell-enhanced [data-theme-toggle] { display: none; }
         .header-inner { min-height: 4rem; height: auto; }
         .brand-label { max-width: 9.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         html:not(.is-shell-enhanced) .header-inner { flex-wrap: wrap; padding: 0.65rem 0; }
@@ -325,7 +332,7 @@ export function renderHead(
 
       @media (max-width: 380px) {
         .header-inner, .content-shell, .footer-inner { width: min(100% - 1.25rem, 1152px); }
-        .brand-label { max-width: 7.8rem; }
+        .brand-label { max-width: none; }
         .header-actions { gap: 0.35rem; }
         .header-search { min-width: 0; width: 2.5rem; padding: 0; justify-content: center; }
         .header-search-label, .header-search kbd { display: none; }
@@ -335,6 +342,8 @@ export function renderHead(
         html { scroll-behavior: auto; }
         *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
       }
+
+      ${renderSearchStyles()}
 
       ${additionalStyles}
     </style>
@@ -354,20 +363,20 @@ export function renderHeader(active = 'home') {
         </svg>
         <span class="brand-label">Symbiote Engine</span>
       </a>
-      <a class="header-search" href="${routes.docs}" aria-label="Open documentation search" title="Open documentation">
+      <button class="header-search" type="button" data-search-open aria-haspopup="dialog" aria-controls="site-search-dialog" aria-label="Search documentation" title="Search documentation">
         <svg class="header-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
           <circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4.5 4.5"></path>
         </svg>
         <span class="header-search-label">Search</span>
         <kbd aria-hidden="true">⌘ K</kbd>
-      </a>
+      </button>
       <div class="header-actions">
         <nav class="site-nav" id="site-navigation" aria-label="Primary navigation">
           ${navLink('guide', 'Guide', active)}
           ${navLink('reference', 'Reference', active)}
           ${navLink('demo', 'Demo', active)}
         </nav>
-        <a class="icon-button" href="https://github.com/RND-PRO/symbiote-engine" target="_blank" rel="noopener" aria-label="GitHub Repository" title="GitHub Repository">
+        <a class="icon-button header-repository" href="https://github.com/RND-PRO/symbiote-engine" target="_blank" rel="noopener" aria-label="GitHub Repository" title="GitHub Repository">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display: block;">
             <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
           </svg>
@@ -376,7 +385,7 @@ export function renderHeader(active = 'home') {
         <button class="icon-button nav-toggle" type="button" data-nav-toggle aria-controls="site-navigation" aria-expanded="false" aria-label="Navigation">☰</button>
       </div>
     </div>
-  </header>`;
+  </header>${renderSearchDialog()}`;
 }
 
 export function renderFooter() {
@@ -394,6 +403,7 @@ export function renderScripts() {
   <script>
     (() => {
       const root = document.documentElement;
+      const header = document.querySelector('.site-header');
       const themeButton = document.querySelector('[data-theme-toggle]');
       const navButton = document.querySelector('[data-nav-toggle]');
       const navigation = document.getElementById('site-navigation');
@@ -412,6 +422,17 @@ export function renderScripts() {
       });
       updateThemeLabel();
 
+      let scrollFrame = 0;
+      const updateHeaderState = () => {
+        scrollFrame = 0;
+        header?.classList.toggle('is-scrolled', window.scrollY > 8);
+      };
+      const onScroll = () => {
+        if (scrollFrame === 0) scrollFrame = requestAnimationFrame(updateHeaderState);
+      };
+      updateHeaderState();
+      window.addEventListener('scroll', onScroll, { passive: true });
+
       const closeNavigation = () => {
         navigation?.classList.remove('is-open');
         navButton?.setAttribute('aria-expanded', 'false');
@@ -429,7 +450,7 @@ export function renderScripts() {
         if (event.key === 'Escape') closeNavigation();
       });
     })();
-  </script>`;
+  </script>${renderSearchScript()}`;
 }
 
 export { routes };

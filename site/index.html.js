@@ -230,6 +230,20 @@ const landingStyles = `
     width: 100%;
     height: 100%;
     display: block;
+    overflow: visible;
+    shape-rendering: geometricPrecision;
+  }
+
+  .diagram-svg path,
+  .diagram-svg line,
+  .diagram-svg circle {
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    vector-effect: non-scaling-stroke;
+  }
+
+  .diagram-svg text {
+    letter-spacing: -0.01em;
   }
 
   .mobile-only {
@@ -249,43 +263,94 @@ const landingStyles = `
 
   @keyframes stroke-dash-progression {
     0% { stroke-dashoffset: 12; opacity: 0.5; }
-    50% { stroke-dashoffset: 0; opacity: 1; }
-    100% { stroke-dashoffset: -12; opacity: 0.5; }
+    100% { stroke-dashoffset: 0; opacity: 1; }
   }
 
-  @keyframes opacity-fade {
-    0%, 100% { opacity: 0.3; }
-    50% { opacity: 1; }
+  @keyframes dash-phase-1 {
+    0% { stroke-dashoffset: 12; opacity: 0.2; }
+    20% { opacity: 1; }
+    80% { stroke-dashoffset: 0; opacity: 1; }
+    100% { stroke-dashoffset: 0; opacity: 0.2; }
+  }
+
+  @keyframes dash-phase-2 {
+    0% { stroke-dashoffset: 12; opacity: 0.2; }
+    20% { opacity: 1; }
+    80% { stroke-dashoffset: 0; opacity: 1; }
+    100% { stroke-dashoffset: 0; opacity: 1; }
+  }
+
+
+  @keyframes reveal-delayed {
+    0%, 40% { opacity: 0; }
+    100% { opacity: 1; }
   }
 
   @keyframes slide-right {
-    0%, 100% { transform: translateX(0); }
-    50% { transform: translateX(6px); }
+    0% { transform: translateX(0); }
+    40%, 100% { transform: translateX(6px); }
   }
 
   @keyframes slide-left {
-    0%, 100% { transform: translateX(0); }
-    50% { transform: translateX(-6px); }
+    0% { transform: translateX(0); }
+    40%, 100% { transform: translateX(-6px); }
   }
 
   .is-enhanced [data-motion-accent="reveal"] {
     opacity: 0;
   }
 
+  .is-enhanced [data-route="reuse"],
+  .is-enhanced [data-route="execute"] {
+    opacity: 0.2;
+  }
+
   .is-enhanced .chapter-row.is-playing [data-motion-accent="reveal"] {
-    animation: opacity-fade 3.6s ease-in-out infinite;
+    animation: reveal-delayed 3.6s ease-in-out forwards;
   }
 
   .is-enhanced .chapter-row.is-playing [data-motion-accent="dash"] {
-    animation: stroke-dash-progression 3.6s ease-in-out infinite;
+    animation: stroke-dash-progression 3.6s ease-in-out forwards;
+  }
+
+  .is-enhanced .chapter-row.is-playing [data-route="reuse"] {
+    animation: dash-phase-1 1.8s ease-in-out forwards;
+  }
+
+  .is-enhanced .chapter-row.is-playing [data-route="execute"] {
+    animation: dash-phase-2 1.8s ease-in-out 1.8s forwards;
   }
 
   .is-enhanced .chapter-row.is-playing [data-motion-accent="slide-right"] {
-    animation: slide-right 3.6s ease-in-out infinite;
+    animation: slide-right 3.6s ease-in-out forwards;
   }
 
   .is-enhanced .chapter-row.is-playing [data-motion-accent="slide-left"] {
-    animation: slide-left 3.6s ease-in-out infinite;
+    animation: slide-left 3.6s ease-in-out forwards;
+  }
+
+  .is-enhanced .chapter-row.is-played [data-motion-accent="reveal"],
+  .is-enhanced .chapter-row.is-played [data-motion-accent="dash"] {
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+
+  .is-enhanced .chapter-row.is-played [data-route="reuse"] {
+    opacity: 0.2;
+    stroke-dashoffset: 0;
+  }
+
+  .is-enhanced .chapter-row.is-played [data-route="execute"] {
+    opacity: 1;
+    stroke-dashoffset: 0;
+  }
+
+  .is-enhanced .chapter-row.is-played [data-motion-accent="slide-right"] {
+    transform: translateX(6px);
+  }
+
+  .is-enhanced .chapter-row.is-played [data-motion-accent="slide-left"] {
+    transform: translateX(-6px);
   }
 
   .closing-cta {
@@ -448,6 +513,11 @@ const landingStyles = `
       transform: none;
       transition: none;
     }
+    .is-enhanced [data-motion-accent="reveal"],
+    .is-enhanced [data-route="reuse"],
+    .is-enhanced [data-route="execute"] {
+      opacity: 1;
+    }
     .is-enhanced .chapter-row.is-playing [data-motion-accent] {
       animation: none;
       transform: none;
@@ -537,11 +607,11 @@ ${renderHead('Portable graph execution', landingStyles, 'Resolve declarative wor
           <div class="chapter-visual">
             <div class="diagram-surface">
               <svg viewBox="0 0 559 240" class="diagram-svg desktop-only" role="img" aria-label="Cache identity">
-                <circle data-visual-object="f1" data-field="inputs" cx="200" cy="120" r="70" fill="var(--line-strong)" fill-opacity="0.1" stroke="var(--line-strong)" stroke-width="2" />
-                <circle data-visual-object="f2" data-field="params" cx="300" cy="120" r="70" fill="var(--brand)" fill-opacity="0.1" stroke="var(--brand)" stroke-width="2" />
+                <g data-motion-accent="slide-right"><circle data-field="inputs" cx="200" cy="120" r="70" fill="var(--line-strong)" fill-opacity="0.1" stroke="var(--line-strong)" stroke-width="2" /></g>
+                <g data-motion-accent="slide-left"><circle data-field="params" cx="300" cy="120" r="70" fill="var(--brand)" fill-opacity="0.1" stroke="var(--brand)" stroke-width="2" /></g>
 
-                <path data-motion-accent="slide-right" d="M 155,115 A 10 10 0 0 1 155,125" fill="none" stroke="var(--line-strong)" stroke-width="2" />
-                <path data-motion-accent="slide-left" d="M 345,115 A 10 10 0 0 0 345,125" fill="none" stroke="var(--brand)" stroke-width="2" />
+                <path d="M 155,115 A 10 10 0 0 1 155,125" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+                <path d="M 345,115 A 10 10 0 0 0 345,125" fill="none" stroke="var(--brand)" stroke-width="2" />
 
                 <path data-visual-object="fingerprint" d="M 235,110 L 235,130 M 242,105 L 242,135 M 249,100 L 249,140 M 256,108 L 256,132 M 263,112 L 263,128" fill="none" stroke="var(--line-strong)" stroke-width="2" />
                 <path data-motion-accent="reveal" d="M 235,110 L 235,130 M 242,105 L 242,135 M 249,100 L 249,140 M 256,108 L 256,132 M 263,112 L 263,128" fill="none" stroke="var(--mint)" stroke-width="2" />
@@ -552,11 +622,11 @@ ${renderHead('Portable graph execution', landingStyles, 'Resolve declarative wor
                 <text x="250" y="90" text-anchor="middle" fill="var(--mint)" font-size="14" font-family="var(--sans)">{ i, p }</text>
               </svg>
               <svg viewBox="0 0 270 220" class="diagram-svg mobile-only" role="img" aria-label="Cache identity">
-                <circle data-visual-object="f1" data-field="inputs" cx="95" cy="110" r="50" fill="var(--line-strong)" fill-opacity="0.1" stroke="var(--line-strong)" stroke-width="2" />
-                <circle data-visual-object="f2" data-field="params" cx="175" cy="110" r="50" fill="var(--brand)" fill-opacity="0.1" stroke="var(--brand)" stroke-width="2" />
+                <g data-motion-accent="slide-right"><circle data-field="inputs" cx="95" cy="110" r="50" fill="var(--line-strong)" fill-opacity="0.1" stroke="var(--line-strong)" stroke-width="2" /></g>
+                <g data-motion-accent="slide-left"><circle data-field="params" cx="175" cy="110" r="50" fill="var(--brand)" fill-opacity="0.1" stroke="var(--brand)" stroke-width="2" /></g>
 
-                <path data-motion-accent="slide-right" d="M 60,105 A 8 8 0 0 1 60,115" fill="none" stroke="var(--line-strong)" stroke-width="2" />
-                <path data-motion-accent="slide-left" d="M 210,105 A 8 8 0 0 0 210,115" fill="none" stroke="var(--brand)" stroke-width="2" />
+                <path d="M 60,105 A 8 8 0 0 1 60,115" fill="none" stroke="var(--line-strong)" stroke-width="2" />
+                <path d="M 210,105 A 8 8 0 0 0 210,115" fill="none" stroke="var(--brand)" stroke-width="2" />
 
                 <path data-visual-object="fingerprint" d="M 121,100 L 121,115 M 128,95 L 128,120 M 135,90 L 135,125 M 142,98 L 142,117 M 149,102 L 149,113" fill="none" stroke="var(--line-strong)" stroke-width="2" />
                 <path data-motion-accent="reveal" d="M 121,100 L 121,115 M 128,95 L 128,120 M 135,90 L 135,125 M 142,98 L 142,117 M 149,102 L 149,113" fill="none" stroke="var(--mint)" stroke-width="2" />
@@ -586,14 +656,14 @@ ${renderHead('Portable graph execution', landingStyles, 'Resolve declarative wor
 
                 <path data-visual-object="gate" d="M 140,120 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0" fill="none" stroke="var(--ink)" stroke-width="2" />
 
-                <path data-route="reuse" data-motion-accent="dash" d="M 150,120 C 220,80 360,80 430,120" fill="none" stroke="var(--mint)" stroke-width="2" stroke-dasharray="6 6" />
+                <path data-route="reuse" data-motion-accent="dash-reuse" d="M 150,120 C 220,80 360,80 430,120" fill="none" stroke="var(--mint)" stroke-width="2" stroke-dasharray="6 6" />
                 <text x="290" y="55" text-anchor="middle" fill="var(--mint)" font-size="14" font-family="var(--sans)">reuse</text>
 
-                <path data-route="execute" data-motion-accent="dash" d="M 150,120 C 220,215 360,215 430,120" fill="none" stroke="var(--brand)" stroke-width="2" stroke-dasharray="6 6" />
+                <path data-route="execute" data-motion-accent="dash-execute" d="M 150,120 C 220,215 360,215 430,120" fill="none" stroke="var(--brand)" stroke-width="2" stroke-dasharray="6 6" />
 
-                <text x="230" y="195" text-anchor="middle" fill="var(--ink)" font-size="14" font-family="var(--sans)">execute</text>
-                <text x="290" y="210" text-anchor="middle" fill="var(--ink)" font-size="14" font-family="var(--sans)">postProcess?</text>
-                <text x="350" y="195" text-anchor="middle" fill="var(--ink)" font-size="14" font-family="var(--sans)">store</text>
+                <text x="230" y="193" text-anchor="middle" fill="var(--muted)" font-size="13" font-family="var(--sans)">execute</text>
+                <text x="290" y="224" text-anchor="middle" fill="var(--muted)" font-size="13" font-family="var(--sans)">postProcess?</text>
+                <text x="350" y="193" text-anchor="middle" fill="var(--muted)" font-size="13" font-family="var(--sans)">store</text>
 
                 <circle data-visual-object="result" cx="440" cy="120" r="10" fill="var(--line-strong)" />
               </svg>
@@ -605,14 +675,14 @@ ${renderHead('Portable graph execution', landingStyles, 'Resolve declarative wor
 
                 <path data-visual-object="gate" d="M 70,110 m -8,0 a 8,8 0 1,0 16,0 a 8,8 0 1,0 -16,0" fill="none" stroke="var(--ink)" stroke-width="2" />
 
-                <path data-route="reuse" data-motion-accent="dash" d="M 78,110 C 110,80 180,80 212,110" fill="none" stroke="var(--mint)" stroke-width="2" stroke-dasharray="6 6" />
+                <path data-route="reuse" data-motion-accent="dash-reuse" d="M 78,110 C 110,80 180,80 212,110" fill="none" stroke="var(--mint)" stroke-width="2" stroke-dasharray="6 6" />
                 <text x="145" y="60" text-anchor="middle" fill="var(--mint)" font-size="13" font-family="var(--sans)">reuse</text>
 
-                <path data-route="execute" data-motion-accent="dash" d="M 78,110 C 110,185 180,185 212,110" fill="none" stroke="var(--brand)" stroke-width="2" stroke-dasharray="6 6" />
+                <path data-route="execute" data-motion-accent="dash-execute" d="M 78,110 C 110,185 180,185 212,110" fill="none" stroke="var(--brand)" stroke-width="2" stroke-dasharray="6 6" />
 
-                <text x="110" y="170" text-anchor="middle" fill="var(--ink)" font-size="13" font-family="var(--sans)">execute</text>
-                <text x="145" y="185" text-anchor="middle" fill="var(--ink)" font-size="13" font-family="var(--sans)">postProcess?</text>
-                <text x="180" y="170" text-anchor="middle" fill="var(--ink)" font-size="13" font-family="var(--sans)">store</text>
+                <text x="110" y="168" text-anchor="middle" fill="var(--muted)" font-size="13" font-family="var(--sans)">execute</text>
+                <text x="145" y="207" text-anchor="middle" fill="var(--muted)" font-size="13" font-family="var(--sans)">postProcess?</text>
+                <text x="180" y="168" text-anchor="middle" fill="var(--muted)" font-size="13" font-family="var(--sans)">store</text>
 
                 <circle data-visual-object="result" cx="220" cy="110" r="8" fill="var(--line-strong)" />
               </svg>
@@ -678,6 +748,6 @@ ${renderHead('Portable graph execution', landingStyles, 'Resolve declarative wor
   </main>
   ${renderFooter()}
   ${renderScripts()}
-  <script type="module" src="./animation-client.js"></script>
+  <script type="module" src="./animation/index.js"></script>
 </body>
 </html>`;

@@ -77,6 +77,8 @@
     "node": ">=18.0.0"
   },
   "devDependencies": {
-    "jsda-kit": "1.6.0"
+    "@symbiotejs/symbiote": "3.8.0-webmcp.2",
+    "jsda-kit": "1.6.0",
+    "symbiote-ui": "0.3.0-alpha.62"
   }
 }

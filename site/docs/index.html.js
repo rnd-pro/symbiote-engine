@@ -37,7 +37,7 @@ const content = `
     </p>
 
     <h3>Installation</h3>
-    <pre><code>npm install symbiote-engine</code></pre>
+    <pre><code data-language="bash">npm install symbiote-engine</code></pre>
 
     <p>
       For a complete basic setup and execution example, see the <a href="${getCanonicalPath('/docs/getting-started/')}">Getting Started</a> guide.
