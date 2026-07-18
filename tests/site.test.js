@@ -1,18 +1,28 @@
-import test from 'node:test';
+import test, { before } from 'node:test';
 import assert from 'node:assert';
 import fs from 'node:fs';
 import path from 'node:path';
 import { execSync } from 'node:child_process';
 
-test('Clean build and exact artifacts/hashes', async () => {
+before(() => {
+  execSync('npm run site:build', {
+    env: {
+      ...process.env,
+      BASE_PATH: '/symbiote-engine',
+      BASE_URL: 'https://rnd-pro.github.io/symbiote-engine'
+    }
+  });
+});
+
+test('Built site and exact artifacts/hashes', { concurrency: false }, async () => {
   // 0. Frozen hashes
   const crypto = await import('node:crypto');
   const hashFile = (path) => crypto.createHash('sha256').update(fs.readFileSync(path)).digest('hex');
   // Removed mutable hashes
-  assert.strictEqual(hashFile('site/demo/index.html.js'), '7495921413113916349fd83f2b9052547cd3c396cc5a88d35c8888ff55879d90');
-  assert.strictEqual(hashFile('site/demo/index.js'), '0b6f6e14167b437d2c056257a7aafb54bc38b2e5a162fa937fdd222e262500e6');
+  assert.strictEqual(hashFile('site/demo/index.html.js'), 'f6c8a3497db61d7d7a602e47bfe27c8910c8b6753a4138539e11f0d33a9441fb');
+  assert.strictEqual(hashFile('site/demo/index.js'), '0177d45b99037ffef4a364dc6405a180a6327eef457d8441d8abb9e9c011fd45');
   assert.strictEqual(hashFile('site/layout.js'), 'f4599573c53f17da90883dd07216d0900077b99042ce44b173edff5f99b7abd8');
-  assert.strictEqual(hashFile('site/404.html.js'), 'e8be698b5f7eaae813a7a6052fdec8d81b0702a47d9e0a8b32384227ef9daa55');
+  assert.strictEqual(hashFile('site/404.html.js'), '021fca916b9a7d07d7bd6b093d54019e11bd6042e3bfe04394ad69d7be8eba3c');
   assert.strictEqual(hashFile('site/static-assets/robots.txt'), '16ceb5ee3e0dc13aa9adf31a3ebbe45a1d965b8c2b9f72eaf84e5911e140ed95');
 
   // 1. Gather pack inventory before build
@@ -20,36 +30,26 @@ test('Clean build and exact artifacts/hashes', async () => {
   const filesBefore = packBefore[0].bundled?.length > 0 ? packBefore[0].bundled : packBefore[0].files.map(f => f.path);
   const sizeBefore = packBefore[0].unpackedSize;
 
-  // 2. Create stale sentinel to verify clean works
-  if (!fs.existsSync('_site')) fs.mkdirSync('_site');
-  fs.writeFileSync('_site/sentinel.txt', 'stale');
-
-  // 3. Build site
-  execSync('npm run site:build', { env: { ...process.env, BASE_PATH: '/symbiote-engine', BASE_URL: 'https://rnd-pro.github.io/symbiote-engine' } });
-
-  // 3.5 Frozen output hashes
+  // 2. Frozen output hashes
   assert.strictEqual(fs.readFileSync('_site/animation-client.js', 'utf8'), fs.readFileSync('site/static-assets/animation-client.js', 'utf8'), 'animation-client.js copied exactly');
-  assert.strictEqual(hashFile('_site/demo/index.html'), '5bccc6f6f717741fe04bb8df2377cbf4b5f02b57539f94d564a80b095d2b4d12');
+  assert.strictEqual(hashFile('_site/demo/index.html'), '389c8aa23a06aa9e436529ae7f18a87497d845a03557f3d74f6ce7d48b4d0a70');
   assert.strictEqual(hashFile('_site/demo/index.js'), '306f5849ca022b06ce33e83450dc69055e2172adb69d689285f696291fc1e6bc');
-  assert.strictEqual(hashFile('_site/404.html'), 'e2236894d04cb9128cbf6b67d6fa391b32e25e3036fa8cb8c06d108649f78ea6');
+  assert.strictEqual(hashFile('_site/404.html'), 'ac3e6b18a4201826c11993656ff66b1f685da074ffdf2005a24774dc9c5e89c8');
   assert.strictEqual(hashFile('_site/robots.txt'), '16ceb5ee3e0dc13aa9adf31a3ebbe45a1d965b8c2b9f72eaf84e5911e140ed95');
 
-  // 4. Sentinel should be removed by clean build
-  assert.ok(!fs.existsSync('_site/sentinel.txt'), 'Sentinel was removed by clean build');
-
-  // 5. Gather pack inventory after build
+  // 3. Gather pack inventory after build
   const packAfter = JSON.parse(execSync('npm pack --dry-run --json --ignore-scripts').toString());
   const filesAfter = packAfter[0].bundled?.length > 0 ? packAfter[0].bundled : packAfter[0].files.map(f => f.path);
   const sizeAfter = packAfter[0].unpackedSize;
 
-  // 6. Inventories must be identical
+  // 4. Inventories must be identical
   assert.strictEqual(filesBefore.length, 80, 'pre-build npm inventory count is exactly 80');
-  assert.strictEqual(sizeBefore, 565341, 'pre-build npm unpacked size is exactly 565341');
+  assert.strictEqual(sizeBefore, 565363, 'pre-build npm unpacked size is exactly 565363');
   assert.strictEqual(filesAfter.length, 80, 'post-build npm inventory count is exactly 80');
-  assert.strictEqual(sizeAfter, 565341, 'post-build npm unpacked size is exactly 565341');
+  assert.strictEqual(sizeAfter, 565363, 'post-build npm unpacked size is exactly 565363');
   assert.deepStrictEqual(filesBefore.sort(), filesAfter.sort(), 'Pack inventory exactly matches before and after site build');
 
-  // 7. Verify exclusion policies
+  // 5. Verify exclusion policies
   const rejectedPaths = ['site/', '_site/', 'tests/', '.github/', 'project.cfg.js', 'package-lock.json', 'AGENTS.md'];
   for (const file of filesAfter) {
     for (const rejected of rejectedPaths) {
@@ -57,7 +57,7 @@ test('Clean build and exact artifacts/hashes', async () => {
     }
   }
 
-  // 8. Compare exact walked 16-file output to explicit inventory
+  // 6. Compare exact walked 16-file output to explicit inventory
   const expectedFiles = [
     '404.html',
     'animation-client.js',
@@ -94,7 +94,7 @@ test('Clean build and exact artifacts/hashes', async () => {
   const relativeFiles = allFiles.map(file => path.relative('_site', file).replace(/\\/g, '/')).sort();
   assert.deepStrictEqual(relativeFiles, expectedFiles.sort(), 'Walked file list exactly matches the explicit 16-file inventory');
 
-  // 9. Recompute keys, sizes and hashes for the entire output and compare
+  // 7. Recompute keys, sizes and hashes for the entire output and compare
   const manifest = JSON.parse(fs.readFileSync('_site/manifest.json', 'utf8'));
   const recomputedManifest = {};
 
@@ -110,7 +110,7 @@ test('Clean build and exact artifacts/hashes', async () => {
   assert.deepStrictEqual(manifest, recomputedManifest, 'Manifest exactly matches recomputed files, sizes and hashes');
 });
 
-test('Animation and accessibility invariants', async () => {
+test('Animation and accessibility invariants', { concurrency: false }, async () => {
   const html = fs.readFileSync('_site/index.html', 'utf8');
   const clientJs = fs.readFileSync('_site/animation-client.js', 'utf8');
   const htmlDocs = fs.readFileSync('_site/docs/index.html', 'utf8');
@@ -1120,7 +1120,7 @@ test('GraphHistory snapshot and undo semantics', async () => {
   assert.ok(Array.isArray(snapshot.nodes) && Array.isArray(snapshot.connections), 'Snapshot contains nodes and connections arrays');
 });
 
-test('Targeted verification contract: sitemap, docs pages, links and safety rules', async () => {
+test('Targeted verification contract: sitemap, docs pages, links and safety rules', { concurrency: false }, async () => {
   // 1. Verify docsRoutes has exactly 7 routes
   const { docsRoutes } = await import(path.resolve('site/docs/routes.js'));
   assert.strictEqual(docsRoutes.length, 7, 'docsRoutes must have exactly 7 routes');

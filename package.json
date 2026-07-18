@@ -32,7 +32,7 @@
     "symbiote-engine": "cli.js"
   },
   "scripts": {
-    "test": "node --test tests/*.test.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
     "site:build": "rm -rf _site && jsda build && node site/build-discovery.js && node site/build-manifest.js",
     "site:dev": "jsda ssg"
   },
