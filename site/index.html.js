@@ -362,7 +362,7 @@ const contentHtml = /*html*/ `
           </div>
         </article>
 
-        <article class="lp-story-row chapter-row chapter-02 reveal-on-scroll" aria-label="Chapter 02 Cache identity">
+        <article class="lp-story-row reverse chapter-row chapter-02 reveal-on-scroll" aria-label="Chapter 02 Cache identity">
           <div class="lp-story-text">
             <span class="lp-story-num">02 / Cache identity</span>
             <h3 class="lp-story-title">Inputs and parameters become one repeatable identity.</h3>
@@ -454,7 +454,7 @@ const contentHtml = /*html*/ `
           </div>
         </article>
 
-        <article class="lp-story-row chapter-row chapter-04 reveal-on-scroll" aria-label="Chapter 04 Observable outcome">
+        <article class="lp-story-row reverse chapter-row chapter-04 reveal-on-scroll" aria-label="Chapter 04 Observable outcome">
           <div class="lp-story-text">
             <span class="lp-story-num">04 / Observable outcome</span>
             <h3 class="lp-story-title">A lifecycle failure becomes output, not a hidden stop.</h3>
