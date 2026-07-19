@@ -1,17 +1,22 @@
-import { renderDocsPage } from '../shell.js';
+import { renderDocsPage } from 'library-pages/shell';
+import { docsRoutes, docsSiteConfig } from '../../site.config.js';
 
-const intro = `
+const currentRoute = docsRoutes.find((route) => route.path === '/docs/runtime/');
+
+export default renderDocsPage({
+  siteConfig: docsSiteConfig(currentRoute),
+  routes: docsRoutes,
+  currentRoute,
+  contentHtml: /*html*/ `
   <div class="docs-header" id="overview">
     <h1>Runtime & CLI</h1>
     <p>
       Symbiote Engine divides execution utilities between browser-compatible APIs and server-side runtimes. It ships with a command-line interface (CLI) for validation and local execution, along with a lightweight synchronization server for development.
     </p>
   </div>
-`;
 
-const content = `
-  <section id="packages">
-    <h2>Package Entrypoints</h2>
+  <section>
+    <h2 id="packages">Package Entrypoints</h2>
     <p>
       The library provides two primary entry points to organize browser-safe logic separately from Node.js-only operations:
     </p>
@@ -37,8 +42,8 @@ const content = `
     </div>
   </section>
 
-  <section id="cli-commands">
-    <h2>CLI Commands</h2>
+  <section>
+    <h2 id="cli-commands">CLI Commands</h2>
     <p>
       The package installs the <code>symbiote-engine</code> command-line executable. It allows developers to run workflows, validate graph definitions, list registered nodes, and inspect workflow structures.
     </p>
@@ -75,8 +80,8 @@ symbiote-engine serve &lt;workflow.json&gt; [--port 3100] [--handlers ./custom] 
     </div>
   </section>
 
-  <section id="graph-server">
-    <h2>GraphServer Connection</h2>
+  <section>
+    <h2 id="graph-server">GraphServer Connection</h2>
     <p>
       The <code>GraphServer</code> subpath provides a factory to synchronize graph modifications between a local workspace and front-end editor components.
     </p>
@@ -121,8 +126,8 @@ await serverInstance.close();</code></pre>
     </div>
   </section>
 
-  <section id="handler-packs">
-    <h2>Reusable Handler Packs</h2>
+  <section>
+    <h2 id="handler-packs">Reusable Handler Packs</h2>
     <p>
       Packs allow developers to bundle and share custom node handler definitions.
     </p>
@@ -135,13 +140,5 @@ await serverInstance.close();</code></pre>
       </li>
     </ul>
   </section>
-`;
-
-export default renderDocsPage({
-  title: 'Runtime & CLI',
-  description: 'Node packages, CLI commands, developer GraphServer primitive, and hot-loadable handler packs.',
-  canonicalPath: '/docs/runtime/',
-  activeRoute: '/docs/runtime/',
-  intro,
-  content
+`,
 });

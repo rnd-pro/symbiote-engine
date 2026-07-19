@@ -1,17 +1,22 @@
-import { renderDocsPage } from '../shell.js';
+import { renderDocsPage } from 'library-pages/shell';
+import { docsRoutes, docsSiteConfig } from '../../site.config.js';
 
-const intro = `
+const currentRoute = docsRoutes.find((route) => route.path === '/docs/getting-started/');
+
+export default renderDocsPage({
+  siteConfig: docsSiteConfig(currentRoute),
+  routes: docsRoutes,
+  currentRoute,
+  contentHtml: /*html*/ `
   <div class="docs-header" id="getting-started">
     <h1>Getting Started</h1>
     <p>
       Symbiote Engine is a pure ESM execution library for Directed Acyclic Graphs (DAGs). This guide walks you through package installation, custom node registration, graph construction, and executing your first pipeline.
     </p>
   </div>
-`;
 
-const content = `
-  <section id="installation">
-    <h2>Installation</h2>
+  <section>
+    <h2 id="installation">Installation</h2>
     <p>
       Install the package using your preferred package manager. Symbiote Engine requires Node.js version 18 or higher.
     </p>
@@ -25,8 +30,8 @@ const content = `
 }</code></pre>
   </section>
 
-  <section id="first-graph">
-    <h2>Your First Graph</h2>
+  <section>
+    <h2 id="first-graph">Your First Graph</h2>
     <p>
       The following executable example shows how to import the required classes, register custom node types, build a simple math pipeline (with nodes that generate and double a value), and execute the graph to yield <code>42</code>.
     </p>
@@ -74,8 +79,8 @@ console.log(result.outputs[double].result); // 42
     </div>
   </section>
 
-  <section id="custom-nodes">
-    <h2>Node Registration</h2>
+  <section>
+    <h2 id="custom-nodes">Node Registration</h2>
     <p>
       Custom node definitions are registered globally via <code>registerNodeType</code>. Node registrations dictate the interface (or driver contract) for custom nodes:
     </p>
@@ -86,8 +91,8 @@ console.log(result.outputs[double].result); // 42
     </ul>
   </section>
 
-  <section id="execution-pipeline">
-    <h2>Execution Pipeline</h2>
+  <section>
+    <h2 id="execution-pipeline">Execution Pipeline</h2>
     <p>
       The <code>Executor</code> runs the DAG sequentially. Here are the key execution steps:
     </p>
@@ -97,13 +102,5 @@ console.log(result.outputs[double].result); // 42
       <li><strong>Socket Matching:</strong> Graph connection validation verifies socket compatibility only when both node definitions and their named sockets exist in the registry. No cyclic checking is performed during connection.</li>
     </ul>
   </section>
-`;
-
-export default renderDocsPage({
-  title: 'Getting Started',
-  description: 'Installation, basic graph construction, custom node registration, and execution pipeline.',
-  canonicalPath: '/docs/getting-started/',
-  activeRoute: '/docs/getting-started/',
-  intro,
-  content
+`,
 });

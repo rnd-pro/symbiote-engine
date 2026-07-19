@@ -1,6 +1,8 @@
-import { renderFooter, renderHead, renderHeader, renderScripts, routes } from './layout.js';
+import { renderPage } from 'library-pages/shell';
+import { buildSearchIndex } from 'library-pages/search';
+import { composeSiteConfig, docsRoutes, resolvePath } from './site.config.js';
 
-const landingStyles = `
+const landingStyles = /*css*/ `
   .landing-shell {
     width: 100%;
     margin: 0 auto;
@@ -402,12 +404,6 @@ const landingStyles = `
       padding: 0 24px;
     }
 
-    .header-inner {
-      padding-left: 24px;
-      padding-right: 24px;
-      width: 100%;
-    }
-
     .hero {
       width: 100%;
       height: auto;
@@ -525,12 +521,7 @@ const landingStyles = `
   }
 `;
 
-export default `<!DOCTYPE html>
-<html lang="en">
-${renderHead('Portable graph execution', landingStyles, 'Resolve declarative workflow graphs through explicit cache, execution and result phases.', '/')}
-<body>
-  ${renderHeader('home')}
-  <main id="main-content">
+const contentHtml = /*html*/ `
     <div class="landing-shell">
 
       <section class="hero" aria-labelledby="hero-title">
@@ -540,8 +531,8 @@ ${renderHead('Portable graph execution', landingStyles, 'Resolve declarative wor
         </h1>
         <p class="hero-lead">Define a portable graph once. At runtime, registered behavior, cache decisions, lifecycle failures, and execution results stay explicit to the host without binding the graph to a product shell.</p>
         <div class="hero-actions">
-          <a class="button button--primary" href="${routes.docs}">Start with the guide</a>
-          <a class="button" href="${routes.demo}">Run the in-memory demo</a>
+          <a class="button button--primary" href="${resolvePath('/docs/')}">Start with the guide</a>
+          <a class="button" href="${resolvePath('/demo/')}">Run the in-memory demo</a>
         </div>
       </section>
 
@@ -736,8 +727,8 @@ ${renderHead('Portable graph execution', landingStyles, 'Resolve declarative wor
       <section class="closing-cta">
         <h2 class="cta-title">Ready to run a graph?</h2>
         <div class="cta-actions">
-          <a class="button button--primary" href="${routes.docs}">Start with the guide</a>
-          <a class="button" href="${routes.demo}">Run the demo</a>
+          <a class="button button--primary" href="${resolvePath('/docs/')}">Start with the guide</a>
+          <a class="button" href="${resolvePath('/demo/')}">Run the demo</a>
         </div>
         <p class="cta-quiet">
           <a href="https://github.com/RND-PRO/symbiote-engine">View source on GitHub</a>
@@ -745,9 +736,16 @@ ${renderHead('Portable graph execution', landingStyles, 'Resolve declarative wor
       </section>
 
     </div>
-  </main>
-  ${renderFooter()}
-  ${renderScripts()}
-  <script type="module" src="./animation/index.js"></script>
-</body>
-</html>`;
+    <script type="module" src="./animation/index.js"></script>
+`;
+
+export default renderPage({
+  siteConfig: composeSiteConfig({
+    pageStyles: landingStyles,
+    description: 'Resolve declarative workflow graphs through explicit cache, execution and result phases.',
+  }),
+  pageTitle: 'Portable graph execution',
+  contentHtml,
+  currentPath: '/',
+  searchIndex: buildSearchIndex(docsRoutes),
+});

@@ -1,17 +1,22 @@
-import { renderDocsPage } from '../shell.js';
+import { renderDocsPage } from 'library-pages/shell';
+import { docsRoutes, docsSiteConfig } from '../../site.config.js';
 
-const intro = `
+const currentRoute = docsRoutes.find((route) => route.path === '/docs/rendering/');
+
+export default renderDocsPage({
+  siteConfig: docsSiteConfig(currentRoute),
+  routes: docsRoutes,
+  currentRoute,
+  contentHtml: /*html*/ `
   <div class="docs-header" id="overview">
     <h1>Media Rendering</h1>
     <p>
       Symbiote Engine includes server-side modules for provider-neutral contracts, host-process in-memory queues, an injected browser-capture adapter, and pure argument/projection/report helpers.
     </p>
   </div>
-`;
 
-const content = `
-  <section id="queues">
-    <h2>Render & Audio Queues</h2>
+  <section>
+    <h2 id="queues">Render & Audio Queues</h2>
     <p>
       The engine provides specialized queuing utilities to coordinate resource-intensive media operations. Both queues run as in-memory data structures inside the local host process and do not orchestrate tasks across multiple remote host environments.
     </p>
@@ -49,8 +54,8 @@ const content = `
     </ul>
   </section>
 
-  <section id="audio-providers">
-    <h2>Local Audio Providers</h2>
+  <section>
+    <h2 id="audio-providers">Local Audio Providers</h2>
     <p>
       Audio providers are host-configured HTTP clients that interface with external speech-to-text or text-to-speech services using an injected fetch client and local artifact storage.
     </p>
@@ -62,8 +67,8 @@ const content = `
     </div>
   </section>
 
-  <section id="browser-capture">
-    <h2>Screencast & Browser Capture</h2>
+  <section>
+    <h2 id="browser-capture">Screencast & Browser Capture</h2>
     <p>
       Visual frame rendering leverages Chromium via Puppeteer to capture web-based templates. Puppeteer is required injection; <code>execFile</code> is optional because the provider defaults to Node's implementation.
     </p>
@@ -80,8 +85,8 @@ const content = `
     </ul>
   </section>
 
-  <section id="finalize-proof">
-    <h2>Finalize & Proof Verification</h2>
+  <section>
+    <h2 id="finalize-proof">Finalize & Proof Verification</h2>
     <p>
       After capturing frames and generating audio tracks, helper utilities are pure argument, projection, and report helpers. They do not merge, encode, inspect media bytes, run FFmpeg/ffprobe, or produce cryptographic attestations.
     </p>
@@ -113,13 +118,5 @@ const content = `
       The <code>buildRenderAudioLayerProof</code> and <code>buildRenderAvSyncProof</code> functions compare caller-supplied metadata and stream timing details to generate validation reports. They are not cryptographic attestations or binary-level provenance verifications.
     </p>
   </section>
-`;
-
-export default renderDocsPage({
-  title: 'Media Rendering',
-  description: 'In-memory queues, audio providers, parallel browser capture, and FFmpeg/ffprobe proof helpers.',
-  canonicalPath: '/docs/rendering/',
-  activeRoute: '/docs/rendering/',
-  intro,
-  content
+`,
 });

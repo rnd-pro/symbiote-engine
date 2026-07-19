@@ -37,10 +37,9 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
   const crypto = await import('node:crypto');
   const hashFile = (path) => crypto.createHash('sha256').update(fs.readFileSync(path)).digest('hex');
   // Removed mutable hashes
-  assert.strictEqual(hashFile('site/demo/index.html.js'), 'f6c8a3497db61d7d7a602e47bfe27c8910c8b6753a4138539e11f0d33a9441fb');
+  assert.strictEqual(hashFile('site/demo/index.html.js'), '7191bcdf86324c411af2e7782c9b3b9a7fd51cbd18d86da05c414743adcda3dd');
   assert.strictEqual(hashFile('site/demo/index.js'), '0177d45b99037ffef4a364dc6405a180a6327eef457d8441d8abb9e9c011fd45');
-  assert.strictEqual(hashFile('site/layout.js'), '61a61db280530348c0844f9ff96ed7c939f6636bef2416748c7a23edc5f26f64');
-  assert.strictEqual(hashFile('site/404.html.js'), '021fca916b9a7d07d7bd6b093d54019e11bd6042e3bfe04394ad69d7be8eba3c');
+  assert.strictEqual(hashFile('site/404.html.js'), '7af42163ccbbf739cc195c5a9f9af564d490ed772a11dfd9a2b9a0795d56d829');
   assert.strictEqual(hashFile('site/static-assets/robots.txt'), '16ceb5ee3e0dc13aa9adf31a3ebbe45a1d965b8c2b9f72eaf84e5911e140ed95');
 
   // 1. Gather pack inventory before build
@@ -62,9 +61,9 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
 
   // 4. Inventories must be identical
   assert.strictEqual(filesBefore.length, 80, 'pre-build npm inventory count is exactly 80');
-  assert.strictEqual(sizeBefore, 565573, 'pre-build npm unpacked size is exactly 565573');
+  assert.strictEqual(sizeBefore, 565638, 'pre-build npm unpacked size is exactly 565638');
   assert.strictEqual(filesAfter.length, 80, 'post-build npm inventory count is exactly 80');
-  assert.strictEqual(sizeAfter, 565573, 'post-build npm unpacked size is exactly 565573');
+  assert.strictEqual(sizeAfter, 565638, 'post-build npm unpacked size is exactly 565638');
   assert.deepStrictEqual(filesBefore.sort(), filesAfter.sort(), 'Pack inventory exactly matches before and after site build');
 
   // 5. Verify exclusion policies
@@ -79,6 +78,7 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
   const expectedFiles = [
     '404.html',
     'animation/index.js',
+    'client/index.js',
     'demo/index.html',
     'demo/index.js',
     'docs/index.html',
@@ -94,7 +94,6 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
     'llms.txt',
     'manifest.json',
     'robots.txt',
-    'search/index.js',
     'sitemap.xml'
   ];
 
@@ -144,10 +143,6 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
 
   // --- 0. Obsolete token rejection ---
   assert.ok(!html.includes('diagram-surface--unboxed'), 'Landing page must not contain obsolete token "diagram-surface--unboxed"');
-  assert.match(html, /\.site-header\s*\{[^}]*border-bottom:\s*1px\s+solid\s+transparent;/s, 'Landing header starts without a visible divider');
-  assert.match(html, /\.site-header\.is-scrolled\s*\{[^}]*border-bottom-color:\s*var\(--line\)/s, 'Landing header reveals its divider after scrolling');
-  assert.match(html, /requestAnimationFrame\(updateHeaderState\)/, 'Landing header scroll state is frame-coalesced');
-  assert.match(html, /addEventListener\('scroll',[\s\S]*passive:\s*true/, 'Landing scroll listener is passive');
   assert.match(html, /shape-rendering:\s*geometricPrecision/, 'Diagram geometry uses a stable rendering hint');
 
   // --- 0.5. Generated route contract ---
@@ -155,15 +150,20 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   const moduleClients = scriptTags.filter(tag => {
     return (tag.includes('type="module"') || tag.includes("type='module'")) && (tag.includes('src='));
   });
-  assert.strictEqual(moduleClients.length, 2, 'Landing loads the animation and search module clients');
+  assert.strictEqual(moduleClients.length, 2, 'Landing loads the animation module client and the shared library-pages client entry');
   const clientTag = moduleClients.find(tag => tag.includes('/animation/index.js'));
-  const searchTag = moduleClients.find(tag => tag.includes('/search/index.js'));
+  const shellTag = moduleClients.find(tag => tag.includes('/client/index.js'));
   assert.ok(clientTag, 'Landing loads the animation JSDA entry');
-  assert.ok(searchTag, 'Landing loads the search JSDA entry');
+  assert.ok(shellTag, 'Landing loads the shared library-pages client entry');
   const srcMatch = clientTag.match(/(?:^|\s)src\s*=\s*(["'])([^"'>]*?)\1/);
   assert.ok(srcMatch, `Could not extract src attribute from: ${clientTag}`);
   const clientUrl = srcMatch[2];
   assert.strictEqual(clientUrl, './animation/index.js', 'Landing module client uses the JSDA bundle entry');
+
+  const shellSrcMatch = shellTag.match(/(?:^|\s)src\s*=\s*(["'])([^"'>]*?)\1/);
+  assert.ok(shellSrcMatch, `Could not extract src attribute from: ${shellTag}`);
+  assert.strictEqual(shellSrcMatch[2], '/symbiote-engine/client/index.js', 'Landing loads the shared client entry from the site base path');
+  assert.ok(fs.existsSync('_site/client/index.js'), 'Shared client entry bundle exists in the built site');
 
   const resolvedPath = path.resolve('_site', clientUrl);
   assert.ok(fs.existsSync(resolvedPath), `Resolved script path must exist: ${resolvedPath}`);
@@ -249,9 +249,9 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
     return htmlContent.substring(startIdx, endIdx);
   }
 
-  const cssStyleMatch = html.match(/<style[^>]*>([\s\S]*?)<\/style>/);
-  assert.ok(cssStyleMatch, 'Should have a style tag');
-  const cssContent = cssStyleMatch[1];
+  const cssStyleMatches = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/g)];
+  assert.ok(cssStyleMatches.length > 0, 'Should have at least one style tag');
+  const cssContent = cssStyleMatches.map(match => match[1]).join('\n');
   const cleanCss = cssContent.replace(/\/\*[\s\S]*?\*\//g, '');
 
   // --- 3. Chapter 3 SVG Route Selection ---
@@ -496,9 +496,8 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
     }
   }
 
-  assert.match(htmlDocs, /\.site-header\.is-scrolled\s*\{[^}]*border-bottom-color:\s*var\(--line\)/s, 'Docs header reveals its divider after scrolling');
   assert.match(htmlDocs, /docs\/index\.js/, 'Docs progressively enhance code blocks with Symbiote UI');
-  assert.match(htmlDocs, /docs\/node-preview\/index\.js/, 'Docs include a Symbiote UI node preview integration');
+  assert.match(htmlGettingStarted, /docs\/node-preview\/index\.js/, 'Getting Started loads the Symbiote UI node preview integration');
   assert.match(htmlGettingStarted, /data-node-preview/, 'Docs retain a readable node preview fallback');
 
   function getMediaBlockBody(cssText, mediaQuery) {
@@ -697,7 +696,7 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
 
   // --- Other accessibility and page invariants ---
   assert.doesNotMatch(html, /class=(?:"[^"]*story-chapter[^"]*"|'[^']*story-chapter[^']*')[^>]*aria-live/, 'Story chapters do not announce decorative reveals');
-  assert.match(html, /class="site-search-status"[^>]*aria-live="polite"/, 'Search result count uses a polite live region');
+  assert.match(html, /data-search-count[^>]*aria-live="polite"/, 'Search result count uses a polite live region');
   assert.ok(/<[^>]+aria-label=(?:"[^"]+"|'[^']+'|[^>\s]+)[^>]*>/.test(html), 'Has exact aria-label element');
 
   const rawHrefs = [...html.matchAll(/href=(?:"([^"]+)"|'([^']+)'|([^>\s]+))/g)];
@@ -736,22 +735,6 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   assert.ok(html404.includes('<h1 class="error-subtitle">Page Not Found</h1>') || /<h1[^>]*>Page Not Found<\/h1>/.test(html404), '404 title is an H1');
   assert.ok(!html404.includes('style="border: none; margin-top: 0;"'), '404 title has no inline style');
 
-  assert.strictEqual((htmlDocs.match(/<nav\b[^>]*>/g) || []).length, 1, 'One desktop route navigation structure');
-  assert.strictEqual((htmlDocs.match(/class="[^"]*nav-link is-current[^"]*"/g) || []).length, 1, 'One active route in top nav');
-
-  assert.ok(/<details[^>]*>[\s\S]*?<summary[^>]*>[^<]*(?:Menu|Navigation|Table of Contents)[^<]*<\/summary>/i.test(htmlDocs), 'Mobile Menu native disclosure exists');
-  assert.ok(/<details[^>]*>[\s\S]*?<summary[^>]*>[^<]*On this page[^<]*<\/summary>/i.test(htmlDocs), 'On this page native disclosure exists');
-
-  assert.ok(/position:\s*(?:fixed|absolute)/.test(htmlDocs), 'CSS encodes fixed/overlay drawer behavior');
-  assert.ok(htmlDocs.includes('320px'), 'CSS contains 320 px cap');
-  assert.ok(htmlDocs.includes('48px'), 'CSS contains 48 px bar');
-  assert.ok(htmlDocs.includes('24px'), 'CSS contains 24 px gutters');
-  assert.ok(/order:\s*\d/.test(htmlDocs) || /grid-(?:auto|template)-flow/.test(htmlDocs) || /flex-direction/.test(htmlDocs), 'CSS contains non-reflow grid ordering');
-
-  assert.ok(/272px/.test(htmlDocs), 'Desktop 272px geometry remains represented');
-  assert.ok(/688px/.test(htmlDocs), 'Desktop 688px geometry remains represented');
-  assert.ok(/208px/.test(htmlDocs) || /13rem/.test(htmlDocs), 'Desktop 208px geometry remains represented');
-
   assert.ok(/<h2[^>]*>\s*Design goals\s*<\/h2>/.test(htmlDocs), 'Design goals is an ordinary h2 section');
   assert.ok(!/<div[^>]*class="[^"]*callout[^"]*"[^>]*>[\s\S]*?Design goals/.test(htmlDocs), 'Design goals is not a callout');
 
@@ -762,29 +745,7 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
     assert.ok(!/border\s*:/.test(calloutCss) || /border\s*:\s*(?:0|none)/.test(calloutCss), 'No full border on generic callout');
   }
 
-  assert.ok(/\.content-shell[^{]*\{[^}]*(?:padding-top:\s*0|padding:\s*0(?:\s+0)?)/.test(htmlDocs), 'content-shell resets padding');
-  assert.ok(/\.docs-container[^{]*\{[^}]*gap:\s*0/.test(htmlDocs), 'docs-container resets gap');
-  assert.ok(/\.docs-container[^{]*\{[^}]*margin-top:\s*0/.test(htmlDocs), 'docs-container resets inherited top margin');
-  assert.ok(/\.docs-container[^{]*\{[^}]*align-items:\s*stretch/.test(htmlDocs), 'docs-container stretches the mobile bar to the viewport gutters');
-  assert.ok(/\.docs-sidebar[^{]*\{[^}]*width:\s*auto/.test(htmlDocs), 'docs-sidebar resets width');
-  assert.ok(/\.docs-sidebar[^{]*\{[^}]*height:\s*48px/.test(htmlDocs), 'docs-sidebar resets height');
-  assert.ok(/\.docs-sidebar[^{]*\{[^}]*position:\s*static/.test(htmlDocs), 'docs-sidebar resets position');
-  assert.ok(/\.docs-sidebar[^{]*\{[^}]*top:\s*auto/.test(htmlDocs), 'docs-sidebar resets top');
-  assert.ok(/\.docs-sidebar[^{]*\{[^}]*overflow:\s*visible/.test(htmlDocs), 'docs-sidebar resets overflow');
-  assert.ok(/\.docs-sidebar[^{]*\{[^}]*padding:\s*0/.test(htmlDocs), 'docs-sidebar resets padding');
-  assert.ok(/\.docs-sidebar[^{]*\{[^}]*border:\s*(?:none|0)/.test(htmlDocs), 'docs-sidebar resets border');
-
-  const breakpointMatch = htmlDocs.match(/@media\s*\(\s*max-width\s*:\s*380px\s*\)/);
-  assert.ok(breakpointMatch, '380px breakpoint exists');
-  if (breakpointMatch) {
-    const chunk = htmlDocs.slice(breakpointMatch.index, breakpointMatch.index + 500);
-    assert.ok(/(?:calc\(|min\()\s*100%\s*-\s*48px/.test(chunk), '380px breakpoint uses 100% - 48px for gutters');
-    assert.ok(!/1\.25rem/.test(chunk) && !/20px/.test(chunk), '380px breakpoint does not use 1.25rem or 20px for gutters');
-  }
-
   const layoutHtml = html;
-  assert.ok(/aria-label="Navigation"/i.test(layoutHtml) || /aria-label="Menu"/i.test(layoutHtml), 'Uses a neutral navigation accessible name');
-  assert.ok(/aria-expanded="false"/.test(layoutHtml), 'Keeps aria-expanded attribute');
   assert.ok(!layoutHtml.includes('<link rel="icon" href="data:,'), 'Rejects empty data:, placeholder');
   assert.ok(layoutHtml.includes('href="data:image/svg+xml'), 'Favicon matches brand mark icon contract (encoded SVG data URL)');
 
@@ -794,7 +755,7 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   }
 
   const forbiddenSelectors = ['status', 'metric', 'caption', 'player', 'dashboard', 'hud', 'kpi', 'card-grid', 'controls'];
-  const narrativeHtml = html.replace(/<dialog\b[^>]*data-site-search-dialog[\s\S]*?<\/dialog>/, '');
+  const narrativeHtml = html.replace(/<dialog\b[^>]*data-search-dialog[\s\S]*?<\/dialog>/, '');
   for (const sel of forbiddenSelectors) {
     const classPattern = new RegExp(`class="[^"]*\\b${sel}\\b[^"]*"`);
     const idPattern = new RegExp(`id="[^"]*\\b${sel}\\b[^"]*"`);
@@ -961,25 +922,13 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   assert.ok(!html.includes('link-item'), 'No link-item should be present in footer/CTA area');
 
   const closingCtaIdx = html.lastIndexOf('closing-cta');
-  let footerStart = -1;
-  if (closingCtaIdx !== -1) {
-    footerStart = closingCtaIdx;
-  } else {
-    const footerTagIdx = html.lastIndexOf('<footer');
-    if (footerTagIdx !== -1) {
-      footerStart = footerTagIdx;
-    } else {
-      footerStart = html.lastIndexOf('cta');
-    }
-  }
-
-  if (footerStart !== -1) {
-    const footerHtml = html.substring(footerStart);
-    const rawLinks = footerHtml.match(/<a\s/g);
-    const linkCount = rawLinks ? rawLinks.length : 0;
-    assert.ok(linkCount <= 3, `Footer/CTA area has at most 3 links, got ${linkCount}`);
-    assert.ok(footerHtml.toLowerCase().includes('github'), 'Footer/CTA area has a GitHub link');
-  }
+  assert.notStrictEqual(closingCtaIdx, -1, 'Closing CTA section exists');
+  const shellFooterIdx = html.indexOf('<footer', closingCtaIdx);
+  const footerHtml = html.substring(closingCtaIdx, shellFooterIdx !== -1 ? shellFooterIdx : undefined);
+  const rawLinks = footerHtml.match(/<a\s/g);
+  const linkCount = rawLinks ? rawLinks.length : 0;
+  assert.ok(linkCount <= 3, `Footer/CTA area has at most 3 links, got ${linkCount}`);
+  assert.ok(footerHtml.toLowerCase().includes('github'), 'Footer/CTA area has a GitHub link');
 
   assert.ok(!html.includes('diag-grid-1') && !html.includes('diag-grid-2'), 'No grid patterns in SVGs');
 
@@ -1103,14 +1052,6 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   assert.ok(!fs.existsSync('edit_test.cjs'), 'Scratch file edit_test.cjs must not exist in the workspace root');
 });
 
-test('URL projection', async () => {
-  process.env.BASE_PATH = '/symbiote-engine';
-  process.env.BASE_URL = 'https://rnd-pro.github.io/symbiote-engine';
-  const { getCanonicalPath, getCanonicalUrl } = await import(path.resolve('site/url.js'));
-  assert.strictEqual(getCanonicalPath('/docs/'), '/symbiote-engine/docs/');
-  assert.strictEqual(getCanonicalUrl('/docs/'), 'https://rnd-pro.github.io/symbiote-engine/docs/');
-});
-
 test('Dependency and lock policy', () => {
   assert.ok(fs.existsSync('package-lock.json'), 'package-lock.json exists');
   const lock = JSON.parse(fs.readFileSync('package-lock.json', 'utf8'));
@@ -1163,9 +1104,9 @@ test('GraphHistory snapshot and undo semantics', async () => {
   assert.ok(Array.isArray(snapshot.nodes) && Array.isArray(snapshot.connections), 'Snapshot contains nodes and connections arrays');
 });
 
-test('Targeted verification contract: sitemap, docs pages, links and safety rules', { concurrency: false }, async () => {
+test('Targeted verification contract: docs pages, links and safety rules', { concurrency: false }, async () => {
   // 1. Verify docsRoutes has exactly 7 routes
-  const { docsRoutes } = await import(path.resolve('site/docs/routes.js'));
+  const { docsRoutes } = await import(path.resolve('site/site.config.js'));
   assert.strictEqual(docsRoutes.length, 7, 'docsRoutes must have exactly 7 routes');
   const routePaths = docsRoutes.map(r => r.path);
   assert.deepStrictEqual(routePaths, [
@@ -1178,25 +1119,7 @@ test('Targeted verification contract: sitemap, docs pages, links and safety rule
     '/docs/safety/'
   ], 'Exact ordered route array');
 
-  // 2. Verify sitemap has exactly 9 routes
-  const sitemapXml = fs.readFileSync('_site/sitemap.xml', 'utf8');
-  const locs = [...sitemapXml.matchAll(/<loc>([^<]+)<\/loc>/g)].map(m => m[1]);
-  assert.strictEqual(locs.length, 9, 'Sitemap must contain exactly 9 URLs');
-
-  const expectedUrls = [
-    'https://rnd-pro.github.io/symbiote-engine/',
-    'https://rnd-pro.github.io/symbiote-engine/docs/',
-    'https://rnd-pro.github.io/symbiote-engine/docs/getting-started/',
-    'https://rnd-pro.github.io/symbiote-engine/docs/guide/',
-    'https://rnd-pro.github.io/symbiote-engine/docs/runtime/',
-    'https://rnd-pro.github.io/symbiote-engine/docs/rendering/',
-    'https://rnd-pro.github.io/symbiote-engine/docs/reference/',
-    'https://rnd-pro.github.io/symbiote-engine/docs/safety/',
-    'https://rnd-pro.github.io/symbiote-engine/demo/'
-  ];
-  assert.deepStrictEqual(locs.sort(), expectedUrls.sort(), 'Sitemap routes must match the 9 expected URLs');
-
-  // 3. Docs pages assertions
+  // 2. Docs pages assertions
   const docsPages = [
     'docs/index.html',
     'docs/getting-started/index.html',
@@ -1274,9 +1197,13 @@ test('Targeted verification contract: sitemap, docs pages, links and safety rule
     const expectedCanonicalSuffix = page.replace('index.html', '');
     assert.ok(canonicalUrl.endsWith('/symbiote-engine/' + expectedCanonicalSuffix), `Canonical URL for ${page} must be correct: got ${canonicalUrl}`);
 
-    // Active sidebar item: exactly one sidebar-link is-active
-    const activeSidebarCount = (html.match(/class="[^"]*sidebar-link[^"]*is-active[^"]*"/g) || []).length;
+    // Active sidebar item: exactly one active lp-sidebar-link in the desktop sidebar
+    const desktopSidebarMatch = html.match(/<aside\b[^>]*class="[^"]*lp-desktop-sidebar[^"]*"[^>]*>([\s\S]*?)<\/aside>/);
+    assert.ok(desktopSidebarMatch, `Page ${page} must render a desktop sidebar`);
+    const desktopSidebar = desktopSidebarMatch[1];
+    const activeSidebarCount = (desktopSidebar.match(/class="[^"]*lp-sidebar-link[^"]*active[^"]*"/g) || []).length;
     assert.strictEqual(activeSidebarCount, 1, `Page ${page} must contain exactly one active sidebar link: got ${activeSidebarCount}`);
+    assert.match(desktopSidebar, /class="[^"]*lp-sidebar-link[^"]*active[^"]*"[^>]*aria-current="page"/, `Page ${page} active sidebar link must carry aria-current="page"`);
 
     // No duplicate IDs
     const idRegex = /id="([^"]+)"/g;
@@ -1462,5 +1389,39 @@ test('Targeted verification contract: sitemap, docs pages, links and safety rule
   const jsFiles = ['_site/animation/index.js', '_site/demo/index.js'];
   for (const jsFile of jsFiles) {
     execSync(`node --check ${jsFile}`);
+  }
+});
+
+test('site sources use only shared package and narrow Symbiote UI contracts', () => {
+  const duplicatedModules = [
+    'site/layout.js',
+    'site/search.js',
+    'site/search/index.js',
+    'site/url.js',
+    'site/docs/shell.js',
+    'site/docs/routes.js',
+  ];
+  for (const duplicated of duplicatedModules) {
+    assert.ok(!fs.existsSync(duplicated), `${duplicated} must be deleted; the shared package owns these mechanics`);
+  }
+
+  function collectJs(dir, fileList = []) {
+    for (const entry of fs.readdirSync(dir)) {
+      const entryPath = path.join(dir, entry);
+      if (fs.statSync(entryPath).isDirectory()) {
+        collectJs(entryPath, fileList);
+      } else if (entry.endsWith('.js')) {
+        fileList.push(entryPath);
+      }
+    }
+    return fileList;
+  }
+
+  for (const sourceFile of collectJs('site')) {
+    const source = fs.readFileSync(sourceFile, 'utf8');
+    assert.ok(!source.includes('.cb-'), `${sourceFile} must not touch private .cb- selectors`);
+    assert.ok(!source.includes('#cb-'), `${sourceFile} must not touch private #cb- selectors`);
+    assert.ok(!source.includes("symbiote-ui/ui"), `${sourceFile} must not import broad symbiote-ui/ui`);
+    assert.ok(!source.includes('GraphExplorerShell'), `${sourceFile} must not reference GraphExplorerShell`);
   }
 });

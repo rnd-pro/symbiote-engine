@@ -1,17 +1,22 @@
-import { renderDocsPage } from '../shell.js';
+import { renderDocsPage } from 'library-pages/shell';
+import { docsRoutes, docsSiteConfig } from '../../site.config.js';
 
-const intro = `
+const currentRoute = docsRoutes.find((route) => route.path === '/docs/safety/');
+
+export default renderDocsPage({
+  siteConfig: docsSiteConfig(currentRoute),
+  routes: docsRoutes,
+  currentRoute,
+  contentHtml: /*html*/ `
   <div class="docs-header" id="overview">
     <h1>Safety & Security</h1>
     <p>
       Symbiote Engine prioritizes portability and minimal dependencies. Because the graph runtime acts as an execution coordinator rather than a security manager, hosts must establish appropriate isolation boundaries, credential management systems, and network controls.
     </p>
   </div>
-`;
 
-const content = `
-  <section id="driver-execution">
-    <h2>Custom Driver Execution</h2>
+  <section>
+    <h2 id="driver-execution">Custom Driver Execution</h2>
     <p>
       Custom node drivers can be registered dynamically at runtime. When dynamic node definitions are compiled, the registry evaluates their implementation via standard JavaScript mechanisms:
     </p>
@@ -35,8 +40,8 @@ const content = `
     </div>
   </section>
 
-  <section id="security-boundaries">
-    <h2>Security Boundaries & Credentials</h2>
+  <section>
+    <h2 id="security-boundaries">Security Boundaries & Credentials</h2>
     <p>
       Protecting sensitive API keys, tokens, and data fields is the responsibility of the host application:
     </p>
@@ -70,8 +75,8 @@ const referenceParams = {
     <p>Engine neither validates nor resolves this reference; a host-owned resolver does so under host policy.</p>
   </section>
 
-  <section id="network-safety">
-    <h2>Network Boundaries & GraphServer</h2>
+  <section>
+    <h2 id="network-safety">Network Boundaries & GraphServer</h2>
     <p>
       The library includes a development server for synchronization sessions, which can be imported via:
     </p>
@@ -99,13 +104,5 @@ const referenceParams = {
       </p>
     </div>
   </section>
-`;
-
-export default renderDocsPage({
-  title: 'Safety & Security',
-  description: 'Host-isolation boundaries, custom driver compilation, credentials security, and sandboxing requirements.',
-  canonicalPath: '/docs/safety/',
-  activeRoute: '/docs/safety/',
-  intro,
-  content
+`,
 });

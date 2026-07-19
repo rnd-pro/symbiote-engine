@@ -1,17 +1,22 @@
-import { renderDocsPage } from '../shell.js';
+import { renderDocsPage } from 'library-pages/shell';
+import { docsRoutes, docsSiteConfig } from '../../site.config.js';
 
-const intro = `
+const currentRoute = docsRoutes.find((route) => route.path === '/docs/guide/');
+
+export default renderDocsPage({
+  siteConfig: docsSiteConfig(currentRoute),
+  routes: docsRoutes,
+  currentRoute,
+  contentHtml: /*html*/ `
   <div class="docs-header" id="guide">
     <h1>Guide</h1>
     <p>
       Dive deeper into the Symbiote Engine architecture: inputs & contracts, sequential execution pipelines, cache management modes, and graph history utilities.
     </p>
   </div>
-`;
 
-const content = `
-  <section id="inputs-contracts">
-    <h2>Inputs &amp; Contracts</h2>
+  <section>
+    <h2 id="inputs-contracts">Inputs &amp; Contracts</h2>
     <p>
       Symbiote Engine uses metadata contracts to represent data flowing between nodes. Sockets are declared using structured definitions:
     </p>
@@ -30,8 +35,8 @@ const content = `
     </div>
   </section>
 
-  <section id="execution-pipeline">
-    <h2>Execution &amp; Pipeline</h2>
+  <section>
+    <h2 id="execution-pipeline">Execution &amp; Pipeline</h2>
     <p>
       The <code>Executor</code> runs sequential traversal based on a Kahn topological sort of the graph's connections. Node execution routes through one of two execution paths based on registration:
     </p>
@@ -55,8 +60,8 @@ const content = `
     </ol>
   </section>
 
-  <section id="cache-identity-modes">
-    <h2>Cache Identity &amp; Modes</h2>
+  <section>
+    <h2 id="cache-identity-modes">Cache Identity &amp; Modes</h2>
     <p>
       To prevent redundant computations, Symbiote Engine manages caching at two distinct layers:
     </p>
@@ -92,8 +97,8 @@ JSON.stringify({ i: inputs, p: params })</code></pre>
     </ul>
   </section>
 
-  <section id="storage-history">
-    <h2>Storage &amp; History</h2>
+  <section>
+    <h2 id="storage-history">Storage &amp; History</h2>
     <p>
       Workflow state, caching, and editing history are transient and host-driven:
     </p>
@@ -130,13 +135,5 @@ const previousSnapshot = history.undo();</code></pre>
       <strong>Crucial note:</strong> One snapshot alone makes <code>undo()</code> return <code>null</code>. The <code>undo()</code> and <code>redo()</code> methods return state snapshots containing only nodes and connections. Snapshots do not mutate the active <code>Graph</code> instance in-place. The caller must manually apply these snapshots back to their graph representation.
     </p>
   </section>
-`;
-
-export default renderDocsPage({
-  title: 'Guide',
-  description: 'Deep dive into input contracts, Kahn topological execution, caching modes, and undo/redo history.',
-  canonicalPath: '/docs/guide/',
-  activeRoute: '/docs/guide/',
-  intro,
-  content
+`,
 });

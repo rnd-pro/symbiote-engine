@@ -1,14 +1,8 @@
-import { renderDocsPage } from '../shell.js';
+import { renderDocsPage } from 'library-pages/shell';
+import { docsRoutes, docsSiteConfig } from '../../site.config.js';
 import { packageExports, symbolInventory } from '../reference-data.js';
 
-const intro = `
-  <div class="docs-header" id="overview">
-    <h1>API Reference</h1>
-    <p>
-      This page provides a generated inventory of the <code>symbiote-engine</code> package. The package export map contains the exact public subpaths and the namespace table is strictly the root/browser namespace union.
-    </p>
-  </div>
-`;
+const currentRoute = docsRoutes.find((route) => route.path === '/docs/reference/');
 
 const exportsRows = packageExports.map(item => `
   <tr>
@@ -25,9 +19,20 @@ const symbolsRows = symbolInventory.map(item => `
   </tr>
 `).join('');
 
-const content = `
-  <section id="package-exports">
-    <h2>Package Exports</h2>
+export default renderDocsPage({
+  siteConfig: docsSiteConfig(currentRoute),
+  routes: docsRoutes,
+  currentRoute,
+  contentHtml: /*html*/ `
+  <div class="docs-header" id="overview">
+    <h1>API Reference</h1>
+    <p>
+      This page provides a generated inventory of the <code>symbiote-engine</code> package. The package export map contains the exact public subpaths and the namespace table is strictly the root/browser namespace union.
+    </p>
+  </div>
+
+  <section>
+    <h2 id="package-exports">Package Exports</h2>
     <p>
       The map contains the exact public subpaths.
     </p>
@@ -44,8 +49,8 @@ const content = `
     </table>
   </section>
 
-  <section id="reference-inventory">
-    <h2>Namespace Symbol Inventory</h2>
+  <section>
+    <h2 id="reference-inventory">Namespace Symbol Inventory</h2>
     <p>
       The namespace table is scoped explicitly to the exact union of the live root and browser namespaces. Unlike the package-export table which is package-wide, this namespace table does not claim every exported subpath symbol.
     </p>
@@ -62,13 +67,5 @@ const content = `
       </tbody>
     </table>
   </section>
-`;
-
-export default renderDocsPage({
-  title: 'API Reference',
-  description: 'Exact generated package export-map and root/browser namespace union.',
-  canonicalPath: '/docs/reference/',
-  activeRoute: '/docs/reference/',
-  intro,
-  content
+`,
 });
