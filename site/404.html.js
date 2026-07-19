@@ -21,19 +21,10 @@ const errorStyles = /*css*/ `
     border: none;
     margin-top: 0;
   }
-  .btn-home {
-    display: inline-block;
-    padding: 0.75rem 1.5rem;
-    background: var(--brand);
-    color: white;
-    font-weight: bold;
-    border-radius: 8px;
-    text-decoration: none;
-    transition: background 0.2s;
-  }
-  .btn-home:hover {
-    background: var(--brand-strong);
-    text-decoration: none;
+  .error-actions {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
   }
 `;
 
@@ -42,7 +33,10 @@ const contentHtml = /*html*/ `
       <div class="error-title">404</div>
       <h1 class="error-subtitle">Page Not Found</h1>
       <p class="error-message">The documentation page or workspace resource you are looking for does not exist or has been relocated.</p>
-      <a href="${resolvePath('/')}" class="btn-home">Return to Overview</a>
+      <div class="error-actions">
+        <a class="lp-cta lp-cta-primary" href="${resolvePath('/')}">Back to home</a>
+        <a class="lp-cta lp-cta-secondary" href="${resolvePath('/docs/')}">Read the guide</a>
+      </div>
     </div>
 `;
 

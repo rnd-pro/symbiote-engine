@@ -12,6 +12,7 @@ const BRAND_MARK_URI = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/
 export const docsRoutes = defineDocsRoutes([
   {
     path: '/docs/',
+    editPath: 'site/docs/index.html.js',
     title: 'Overview',
     section: 'Getting Started',
     headers: ['architecture', 'execution', 'model', 'boundaries'],
@@ -19,6 +20,7 @@ export const docsRoutes = defineDocsRoutes([
   },
   {
     path: '/docs/getting-started/',
+    editPath: 'site/docs/getting-started/index.html.js',
     title: 'Getting Started',
     section: 'Getting Started',
     headers: ['install', 'node', 'graph', 'register', 'executor'],
@@ -26,6 +28,7 @@ export const docsRoutes = defineDocsRoutes([
   },
   {
     path: '/docs/guide/',
+    editPath: 'site/docs/guide/index.html.js',
     title: 'Guide',
     section: 'Guides & Runtime',
     headers: ['cache', 'caching', 'DAG', 'history', 'undo', 'redo'],
@@ -33,6 +36,7 @@ export const docsRoutes = defineDocsRoutes([
   },
   {
     path: '/docs/runtime/',
+    editPath: 'site/docs/runtime/index.html.js',
     title: 'Runtime & CLI',
     section: 'Guides & Runtime',
     headers: ['command', 'line', 'GraphServer', 'handlers', 'packs'],
@@ -40,6 +44,7 @@ export const docsRoutes = defineDocsRoutes([
   },
   {
     path: '/docs/rendering/',
+    editPath: 'site/docs/rendering/index.html.js',
     title: 'Media Rendering',
     section: 'Guides & Runtime',
     headers: ['audio', 'video', 'capture', 'ffmpeg', 'frames'],
@@ -47,6 +52,7 @@ export const docsRoutes = defineDocsRoutes([
   },
   {
     path: '/docs/reference/',
+    editPath: 'site/docs/reference/index.html.js',
     title: 'API Reference',
     section: 'Reference & Safety',
     headers: ['exports', 'symbols', 'modules', 'package'],
@@ -54,6 +60,7 @@ export const docsRoutes = defineDocsRoutes([
   },
   {
     path: '/docs/safety/',
+    editPath: 'site/docs/safety/index.html.js',
     title: 'Safety & Security',
     section: 'Reference & Safety',
     headers: ['sandbox', 'credentials', 'isolation', 'network', 'drivers'],
@@ -245,6 +252,7 @@ const BASE_CONFIG = {
       { label: 'GitHub', path: 'https://github.com/RND-PRO/symbiote-engine' },
     ],
   },
+  editBaseUrl: 'https://github.com/RND-PRO/symbiote-engine/edit/main/',
   themeStorageKey: 'symbiote-theme',
   basePath: pagesEnv.basePath,
   symbioteTokenBridge: true,

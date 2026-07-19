@@ -39,7 +39,7 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
   // Removed mutable hashes
   assert.strictEqual(hashFile('site/demo/index.html.js'), '7191bcdf86324c411af2e7782c9b3b9a7fd51cbd18d86da05c414743adcda3dd');
   assert.strictEqual(hashFile('site/demo/index.js'), '0177d45b99037ffef4a364dc6405a180a6327eef457d8441d8abb9e9c011fd45');
-  assert.strictEqual(hashFile('site/404.html.js'), '7af42163ccbbf739cc195c5a9f9af564d490ed772a11dfd9a2b9a0795d56d829');
+  assert.strictEqual(hashFile('site/404.html.js'), '9099876d98b1a18e779d5e7b397109a91aaefbfccec07629b229f4713f907385');
   assert.strictEqual(hashFile('site/static-assets/robots.txt'), '16ceb5ee3e0dc13aa9adf31a3ebbe45a1d965b8c2b9f72eaf84e5911e140ed95');
 
   // 1. Gather pack inventory before build
@@ -683,7 +683,7 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   assert.ok(html404.includes('<h1 class="error-subtitle">Page Not Found</h1>') || /<h1[^>]*>Page Not Found<\/h1>/.test(html404), '404 title is an H1');
   assert.ok(!html404.includes('style="border: none; margin-top: 0;"'), '404 title has no inline style');
 
-  assert.ok(/<h2[^>]*>\s*Design goals\s*<\/h2>/.test(htmlDocs), 'Design goals is an ordinary h2 section');
+  assert.ok(/<h2[^>]*>\s*Design goals\s*(?:<a class="lp-anchor"[^>]*>#<\/a>\s*)?<\/h2>/.test(htmlDocs), 'Design goals is an ordinary h2 section');
   assert.ok(!/<div[^>]*class="[^"]*callout[^"]*"[^>]*>[\s\S]*?Design goals/.test(htmlDocs), 'Design goals is not a callout');
 
   const calloutCssMatch = htmlDocs.match(/\.callout\s*\{([^}]+)\}/);
@@ -728,6 +728,10 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   for (const m of opacityZeroMatches) {
     const selector = m[1].trim();
     if (selector.includes('@keyframes') || selector.includes('from') || selector.includes('to') || selector.includes('%')) {
+      continue;
+    }
+    if (selector.includes('.lp-anchor')) {
+      // Shared heading anchors reveal via pure CSS hover/focus, not JS.
       continue;
     }
     assert.ok(selector.includes('.is-enhanced'), `Selector "${selector}" setting opacity: 0 must be scoped with .is-enhanced to support progressive enhancement static visibility`);

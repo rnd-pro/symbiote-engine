@@ -305,6 +305,7 @@ const contentHtml = /*html*/ `
         <div class="lp-hero-actions">
           <a class="lp-cta lp-cta-primary" href="${resolvePath('/docs/')}">Start with the guide</a>
           <a class="lp-cta lp-cta-secondary" href="${resolvePath('/demo/')}">Run the in-memory demo</a>
+          <a class="lp-cta lp-cta-secondary" href="https://github.com/RND-PRO/symbiote-engine">GitHub</a>
         </div>
       </section>
 
