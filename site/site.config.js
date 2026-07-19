@@ -242,6 +242,27 @@ th {
 }
 `;
 
+const SYMBIOTE_STACK = {
+  title: 'Part of the Symbiote stack',
+  items: [
+    {
+      label: 'symbiote-workspace',
+      description: 'Turns chat intent into portable, executable workspaces. The flagship track of the stack.',
+      path: 'https://rnd-pro.github.io/symbiote-workspace/',
+    },
+    {
+      label: 'symbiote-engine',
+      description: 'The execution library: portable graph execution behind workspace configs — or standalone in your own backend.',
+      current: true,
+    },
+    {
+      label: 'symbiote-ui',
+      description: 'Browser UI primitives and the component catalog the stack builds interfaces from.',
+      path: 'https://rnd-pro.github.io/symbiote-ui/',
+    },
+  ],
+};
+
 const BASE_CONFIG = {
   brand: {
     title: 'Symbiote Engine',
@@ -278,9 +299,10 @@ const BASE_CONFIG = {
  * @param {boolean} [family.narrow]
  * @returns {Object}
  */
-export function composeSiteConfig({ pageStyles = '', clientEntryPath = '/client/index.js', description, narrow = false } = {}) {
+export function composeSiteConfig({ pageStyles = '', clientEntryPath = '/client/index.js', description, narrow = false, withStack = false } = {}) {
   return defineSiteConfig({
     ...BASE_CONFIG,
+    ...(withStack ? { stack: SYMBIOTE_STACK } : {}),
     metadata: {
       ...BASE_CONFIG.metadata,
       description: description ?? BASE_CONFIG.metadata.description,

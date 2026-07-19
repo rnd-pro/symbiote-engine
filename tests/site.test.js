@@ -926,11 +926,20 @@ test('Animation and accessibility invariants', { concurrency: false }, async () 
   const closingCtaIdx = html.lastIndexOf('closing-cta');
   assert.notStrictEqual(closingCtaIdx, -1, 'Closing CTA section exists');
   const shellFooterIdx = html.indexOf('<footer', closingCtaIdx);
-  const footerHtml = html.substring(closingCtaIdx, shellFooterIdx !== -1 ? shellFooterIdx : undefined);
+  const stackIdx = html.indexOf('class="lp-stack"', closingCtaIdx);
+  const ctaEnd = stackIdx !== -1 ? stackIdx : (shellFooterIdx !== -1 ? shellFooterIdx : undefined);
+  const footerHtml = html.substring(closingCtaIdx, ctaEnd);
   const rawLinks = footerHtml.match(/<a\s/g);
   const linkCount = rawLinks ? rawLinks.length : 0;
   assert.ok(linkCount <= 3, `Footer/CTA area has at most 3 links, got ${linkCount}`);
   assert.ok(footerHtml.toLowerCase().includes('github'), 'Footer/CTA area has a GitHub link');
+
+  assert.notStrictEqual(stackIdx, -1, 'Landing carries the Symbiote stack section');
+  const stackHtml = html.substring(stackIdx, shellFooterIdx !== -1 ? shellFooterIdx : undefined);
+  const stackLinks = stackHtml.match(/<a\s/g) || [];
+  assert.strictEqual(stackLinks.length, 2, 'Stack section links to the two sibling libraries');
+  assert.ok(stackHtml.includes('aria-current="true"'), 'Stack section marks the current library');
+  assert.ok(stackHtml.includes('symbiote-workspace'), 'Stack section names the flagship workspace track');
 
   assert.ok(!html.includes('diag-grid-1') && !html.includes('diag-grid-2'), 'No grid patterns in SVGs');
 

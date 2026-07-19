@@ -741,6 +741,7 @@ export default renderPage({
   siteConfig: composeSiteConfig({
     pageStyles: landingStyles,
     description: 'Resolve declarative workflow graphs through explicit cache, execution and result phases.',
+    withStack: true,
   }),
   pageTitle: 'Portable graph execution',
   contentHtml,
