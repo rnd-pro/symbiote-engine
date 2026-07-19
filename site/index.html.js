@@ -3,22 +3,20 @@ import { buildSearchIndex } from 'library-pages/search';
 import { composeSiteConfig, docsRoutes, resolvePath } from './site.config.js';
 
 const landingStyles = /*css*/ `
+  .lp-page-container {
+    max-width: 1200px;
+  }
+
   .landing-shell {
     width: 100%;
     margin: 0 auto;
     padding: 0;
     box-sizing: border-box;
-  }
-
-  @media (min-width: 1152px) {
-    .landing-shell {
-      width: 1152px;
-    }
+    max-width: 1152px;
   }
 
   @media (min-width: 901px) and (max-width: 1151px) {
     .landing-shell {
-      width: 100%;
       padding: 0 24px;
     }
   }
