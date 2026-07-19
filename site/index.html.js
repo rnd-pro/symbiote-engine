@@ -28,115 +28,33 @@ const landingStyles = /*css*/ `
     flex-direction: column;
   }
 
-  .hero-title-accent { color: var(--brand); }
-
   @media (min-width: 901px) {
     .hero {
       height: 628px;
+      padding: 0;
     }
 
-    .display-type {
+    .hero .lp-hero-title {
       position: absolute;
       top: 80px;
       left: 0;
       margin: 0;
-      font-size: 56px;
-      line-height: 64px;
-      font-weight: 700;
       max-width: 576px;
-      letter-spacing: -0.02em;
-      color: var(--ink);
     }
 
-    .display-type span {
-      display: block;
-    }
-
-    .hero-lead {
+    .hero .lp-hero-lead {
       position: absolute;
       top: 336px;
       left: 0;
       margin: 0;
-      font-size: 24px;
-      line-height: 36px;
-      font-weight: 500;
-      max-width: 576px;
-      color: var(--muted);
     }
 
-    .hero-actions {
+    .hero .lp-hero-actions {
       position: absolute;
       top: 524px;
       left: 0;
       margin: 0;
-      display: flex;
-      gap: 16px;
     }
-  }
-
-  .button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 40px;
-    padding: 0 24px;
-    border-radius: 20px;
-    font-size: 14px;
-    font-weight: 600;
-    text-decoration: none;
-    box-sizing: border-box;
-    transition: background 150ms ease, color 150ms ease, border-color 150ms ease;
-  }
-
-  .button--primary {
-    background: var(--brand);
-    color: var(--page);
-    border: 1px solid var(--brand);
-  }
-
-  :root[data-theme="dark"] .button--primary {
-    color: var(--page);
-  }
-
-  .button--primary:hover {
-    background: var(--brand-strong);
-    border-color: var(--brand-strong);
-  }
-
-  .button:not(.button--primary) {
-    background: var(--surface-soft);
-    color: var(--ink);
-    border: 1px solid transparent;
-  }
-
-  .button:not(.button--primary):hover {
-    background: var(--surface);
-    border-color: transparent;
-  }
-
-  .story-intro {
-    text-align: center;
-    max-width: 720px;
-    margin: 0 auto;
-    padding-top: 24px;
-    box-sizing: border-box;
-  }
-
-  .story-eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    line-height: 16px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--brand);
-    background: var(--brand-soft);
-    border: 1px solid var(--brand);
-    padding: 4px 10px;
-    border-radius: 9999px;
-    margin: 0 auto 34px auto;
   }
 
   .story-eyebrow-icon {
@@ -145,73 +63,18 @@ const landingStyles = /*css*/ `
     flex-shrink: 0;
   }
 
-  .story-title {
-    font-size: 40px;
-    line-height: 46px;
-    font-weight: 700;
-    margin: 0 0 16px 0;
-    color: var(--ink);
-    letter-spacing: -0.02em;
-  }
-
-  .story-lead {
-    font-size: 16.8px;
-    line-height: 26.88px;
-    font-weight: 400;
-    color: var(--muted);
-    margin: 0 0 64px 0;
-  }
-
-  .chapter-row {
-    display: flex;
-    align-items: center;
-    gap: 40px;
-    width: 100%;
-    max-width: 1104px;
+  .lp-story-row {
     height: 280px;
-    margin: 0 auto 80px auto;
-    box-sizing: border-box;
   }
 
-  article.chapter-row:nth-of-type(even) {
-    flex-direction: row-reverse;
-  }
-
-  .chapter-text {
+  .lp-story-text {
     width: 505px;
-    flex-shrink: 1;
-    min-width: 0;
+    flex: 0 1 auto;
   }
 
-  .chapter-visual {
+  .lp-story-visual {
     width: 559px;
-    flex-shrink: 1;
-    min-width: 0;
-  }
-
-  .chapter-num {
-    display: block;
-    color: var(--brand);
-    font-size: 14px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    margin-bottom: 8px;
-  }
-
-  .chapter-title {
-    font-size: 25.6px;
-    line-height: 32px;
-    font-weight: 650;
-    margin: 0 0 12px 0;
-    color: var(--ink);
-  }
-
-  .chapter-desc {
-    font-size: 16px;
-    line-height: 26.4px;
-    color: var(--muted);
-    margin: 0;
+    flex: 0 1 auto;
   }
 
   .diagram-surface {
@@ -261,96 +124,38 @@ const landingStyles = /*css*/ `
     transform: translateY(0);
   }
 
-  @keyframes stroke-dash-progression {
-    0% { stroke-dashoffset: 12; opacity: 0.5; }
-    100% { stroke-dashoffset: 0; opacity: 1; }
-  }
-
-  @keyframes dash-phase-1 {
-    0% { stroke-dashoffset: 12; opacity: 0.2; }
-    20% { opacity: 1; }
-    80% { stroke-dashoffset: 0; opacity: 1; }
-    100% { stroke-dashoffset: 0; opacity: 0.2; }
-  }
-
-  @keyframes dash-phase-2 {
-    0% { stroke-dashoffset: 12; opacity: 0.2; }
-    20% { opacity: 1; }
-    80% { stroke-dashoffset: 0; opacity: 1; }
-    100% { stroke-dashoffset: 0; opacity: 1; }
-  }
-
-
-  @keyframes reveal-delayed {
-    0%, 40% { opacity: 0; }
-    100% { opacity: 1; }
-  }
-
-  @keyframes slide-right {
-    0% { transform: translateX(0); }
-    40%, 100% { transform: translateX(6px); }
-  }
-
-  @keyframes slide-left {
-    0% { transform: translateX(0); }
-    40%, 100% { transform: translateX(-6px); }
-  }
-
   .is-enhanced [data-motion-accent="reveal"] {
     opacity: 0;
+    transition: opacity 600ms ease 300ms;
   }
 
-  .is-enhanced [data-route="reuse"],
-  .is-enhanced [data-route="execute"] {
-    opacity: 0.2;
+  .is-enhanced [data-motion-accent="slide-right"],
+  .is-enhanced [data-motion-accent="slide-left"] {
+    transition: transform 600ms ease 300ms;
   }
 
-  .is-enhanced .chapter-row.is-playing [data-motion-accent="reveal"] {
-    animation: reveal-delayed 3.6s ease-in-out forwards;
+  .is-enhanced [data-route="reuse"] {
+    opacity: 0.45;
   }
 
-  .is-enhanced .chapter-row.is-playing [data-motion-accent="dash"] {
-    animation: stroke-dash-progression 3.6s ease-in-out forwards;
-  }
+  @media (prefers-reduced-motion: no-preference) {
+    .is-enhanced .chapter-row.is-revealed [data-motion-accent="reveal"] {
+      opacity: 1;
+    }
 
-  .is-enhanced .chapter-row.is-playing [data-route="reuse"] {
-    animation: dash-phase-1 1.8s ease-in-out forwards;
-  }
+    .is-enhanced .chapter-row.is-revealed [data-motion-accent="slide-right"] {
+      transform: translateX(6px);
+    }
 
-  .is-enhanced .chapter-row.is-playing [data-route="execute"] {
-    animation: dash-phase-2 1.8s ease-in-out 1.8s forwards;
-  }
+    .is-enhanced .chapter-row.is-revealed [data-motion-accent="slide-left"] {
+      transform: translateX(-6px);
+    }
 
-  .is-enhanced .chapter-row.is-playing [data-motion-accent="slide-right"] {
-    animation: slide-right 3.6s ease-in-out forwards;
-  }
-
-  .is-enhanced .chapter-row.is-playing [data-motion-accent="slide-left"] {
-    animation: slide-left 3.6s ease-in-out forwards;
-  }
-
-  .is-enhanced .chapter-row.is-played [data-motion-accent="reveal"],
-  .is-enhanced .chapter-row.is-played [data-motion-accent="dash"] {
-    opacity: 1;
-    stroke-dashoffset: 0;
-  }
-
-  .is-enhanced .chapter-row.is-played [data-route="reuse"] {
-    opacity: 0.2;
-    stroke-dashoffset: 0;
-  }
-
-  .is-enhanced .chapter-row.is-played [data-route="execute"] {
-    opacity: 1;
-    stroke-dashoffset: 0;
-  }
-
-  .is-enhanced .chapter-row.is-played [data-motion-accent="slide-right"] {
-    transform: translateX(6px);
-  }
-
-  .is-enhanced .chapter-row.is-played [data-motion-accent="slide-left"] {
-    transform: translateX(-6px);
+    .is-enhanced .chapter-row.is-revealed [data-motion-accent="dash"],
+    .is-enhanced .chapter-row.is-revealed [data-route="reuse"],
+    .is-enhanced .chapter-row.is-revealed [data-route="execute"] {
+      animation: lp-dash-flow 1.6s linear infinite;
+    }
   }
 
   .closing-cta {
@@ -409,70 +214,41 @@ const landingStyles = /*css*/ `
       padding-bottom: 48px;
     }
 
-    .display-type {
+    .hero .lp-hero-title {
       font-size: 32px;
       line-height: 40px;
       max-width: 100%;
       margin-bottom: 16px;
     }
 
-    .hero-lead {
-      font-size: 18px;
-      line-height: 28px;
+    .hero .lp-hero-lead {
       max-width: 100%;
       margin-bottom: 24px;
     }
 
-    .hero-actions {
-      display: flex;
+    .hero .lp-hero-actions {
       flex-direction: column;
       gap: 12px;
       width: 100%;
     }
 
-    .button {
+    .lp-cta {
       width: 100%;
     }
 
-    .story-intro {
+    .lp-section-intro {
       padding-top: 32px;
       margin-bottom: 32px;
       width: 100%;
     }
 
-    .story-eyebrow {
-      margin: 0 auto 12px auto;
-    }
-
-    .story-title {
-      font-size: 28px;
-      line-height: 34px;
-      margin-bottom: 12px;
-    }
-
-    .story-lead {
-      font-size: 15px;
-      line-height: 22px;
-      margin-bottom: 32px;
-    }
-
-    .chapter-row, article.chapter-row:nth-of-type(even) {
-      flex-direction: column;
+    .lp-story-row {
       height: auto;
-      gap: 24px;
-      margin-bottom: 64px;
-      width: 100%;
-      padding: 0;
     }
 
-    .chapter-text {
+    .lp-story-text,
+    .lp-story-visual {
       width: 100%;
-      order: 1;
-    }
-
-    .chapter-visual {
-      width: 100%;
-      order: 2;
     }
 
     .desktop-only {
@@ -507,14 +283,12 @@ const landingStyles = /*css*/ `
       transform: none;
       transition: none;
     }
+
     .is-enhanced [data-motion-accent="reveal"],
     .is-enhanced [data-route="reuse"],
     .is-enhanced [data-route="execute"] {
       opacity: 1;
-    }
-    .is-enhanced .chapter-row.is-playing [data-motion-accent] {
-      animation: none;
-      transform: none;
+      transition: none;
     }
   }
 `;
@@ -523,31 +297,31 @@ const contentHtml = /*html*/ `
     <div class="landing-shell">
 
       <section class="hero" aria-labelledby="hero-title">
-        <h1 id="hero-title" class="display-type">
-          <span class="hero-title-accent">Symbiote Engine</span>
-          <span class="hero-title-thesis">Portable graph execution, made observable.</span>
+        <h1 id="hero-title" class="lp-hero-title">
+          <span class="lp-hero-accent">Symbiote Engine</span>
+          <span>Portable graph execution, made observable.</span>
         </h1>
-        <p class="hero-lead">Define a portable graph once. At runtime, registered behavior, cache decisions, lifecycle failures, and execution results stay explicit to the host without binding the graph to a product shell.</p>
-        <div class="hero-actions">
-          <a class="button button--primary" href="${resolvePath('/docs/')}">Start with the guide</a>
-          <a class="button" href="${resolvePath('/demo/')}">Run the in-memory demo</a>
+        <p class="lp-hero-lead">Define a portable graph once. At runtime, registered behavior, cache decisions, lifecycle failures, and execution results stay explicit to the host without binding the graph to a product shell.</p>
+        <div class="lp-hero-actions">
+          <a class="lp-cta lp-cta-primary" href="${resolvePath('/docs/')}">Start with the guide</a>
+          <a class="lp-cta lp-cta-secondary" href="${resolvePath('/demo/')}">Run the in-memory demo</a>
         </div>
       </section>
 
       <section class="how-it-works" aria-labelledby="story-title-main">
-        <div class="story-intro">
-          <span class="story-eyebrow"><svg class="story-eyebrow-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="12" r="1.5" fill="currentColor" /><circle cx="12" cy="12" r="1.5" fill="currentColor" /><circle cx="8" cy="4" r="1.5" fill="currentColor" /><path d="M5.2 10.4l1.6-4.8m2.4 0l1.6 4.8" /></svg>How it works</span>
-          <h2 id="story-title-main" class="story-title">One graph. Every branch stays visible.</h2>
-          <p class="story-lead">Graph data meets registered behavior at runtime. Engine resolves cache identity, chooses reuse or execution, and returns lifecycle failures as node-scoped output.</p>
+        <div class="lp-section-intro">
+          <span class="lp-eyebrow"><svg class="story-eyebrow-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="4" cy="12" r="1.5" fill="currentColor" /><circle cx="12" cy="12" r="1.5" fill="currentColor" /><circle cx="8" cy="4" r="1.5" fill="currentColor" /><path d="M5.2 10.4l1.6-4.8m2.4 0l1.6 4.8" /></svg>How it works</span>
+          <h2 id="story-title-main" class="lp-section-title">One graph. Every branch stays visible.</h2>
+          <p class="lp-section-lead">Graph data meets registered behavior at runtime. Engine resolves cache identity, chooses reuse or execution, and returns lifecycle failures as node-scoped output.</p>
         </div>
 
-        <article class="chapter-row chapter-01 reveal-on-scroll" aria-label="Chapter 01 Graph shape">
-          <div class="chapter-text">
-            <span class="chapter-num">01 / Graph shape</span>
-            <h3 class="chapter-title">A graph stays portable until the host supplies behavior.</h3>
-            <p class="chapter-desc">JSON carries node types, parameters, and connections. The registry maps those types to behavior at runtime, so graph data remains independent of a product shell.</p>
+        <article class="lp-story-row chapter-row chapter-01 reveal-on-scroll" aria-label="Chapter 01 Graph shape">
+          <div class="lp-story-text">
+            <span class="lp-story-num">01 / Graph shape</span>
+            <h3 class="lp-story-title">A graph stays portable until the host supplies behavior.</h3>
+            <p class="lp-story-desc">JSON carries node types, parameters, and connections. The registry maps those types to behavior at runtime, so graph data remains independent of a product shell.</p>
           </div>
-          <div class="chapter-visual">
+          <div class="lp-story-visual">
             <div class="diagram-surface">
               <svg viewBox="0 0 559 240" class="diagram-svg desktop-only" role="img" aria-label="Graph shape">
                 <path data-visual-object="doc-plane" d="M 50,40 L 350,40 L 390,80 L 390,200 L 50,200 Z M 350,40 L 350,80 L 390,80" fill="none" stroke="var(--line-strong)" stroke-width="2" />
@@ -587,13 +361,13 @@ const contentHtml = /*html*/ `
           </div>
         </article>
 
-        <article class="chapter-row chapter-02 reveal-on-scroll" aria-label="Chapter 02 Cache identity">
-          <div class="chapter-text">
-            <span class="chapter-num">02 / Cache identity</span>
-            <h3 class="chapter-title">Inputs and parameters become one repeatable identity.</h3>
-            <p class="chapter-desc">For lifecycle-enabled nodes, the default cache key is exactly JSON.stringify({ i: inputs, p: params }). Execution context reaches execute, but it is not part of that default key.</p>
+        <article class="lp-story-row chapter-row chapter-02 reveal-on-scroll" aria-label="Chapter 02 Cache identity">
+          <div class="lp-story-text">
+            <span class="lp-story-num">02 / Cache identity</span>
+            <h3 class="lp-story-title">Inputs and parameters become one repeatable identity.</h3>
+            <p class="lp-story-desc">For lifecycle-enabled nodes, the default cache key is exactly JSON.stringify({ i: inputs, p: params }). Execution context reaches execute, but it is not part of that default key.</p>
           </div>
-          <div class="chapter-visual">
+          <div class="lp-story-visual">
             <div class="diagram-surface">
               <svg viewBox="0 0 559 240" class="diagram-svg desktop-only" role="img" aria-label="Cache identity">
                 <g data-motion-accent="slide-right"><circle data-field="inputs" cx="200" cy="120" r="70" fill="var(--line-strong)" fill-opacity="0.1" stroke="var(--line-strong)" stroke-width="2" /></g>
@@ -629,13 +403,13 @@ const contentHtml = /*html*/ `
           </div>
         </article>
 
-        <article class="chapter-row chapter-03 reveal-on-scroll" aria-label="Chapter 03 Cache branch">
-          <div class="chapter-text">
-            <span class="chapter-num">03 / Cache branch</span>
-            <h3 class="chapter-title">Validation comes first; then the cache chooses the path.</h3>
-            <p class="chapter-desc">After validation and key resolution, a matching auto-mode entry returns stored output. A miss executes, may post-process the output, and then stores it under the resolved key.</p>
+        <article class="lp-story-row chapter-row chapter-03 reveal-on-scroll" aria-label="Chapter 03 Cache branch">
+          <div class="lp-story-text">
+            <span class="lp-story-num">03 / Cache branch</span>
+            <h3 class="lp-story-title">Validation comes first; then the cache chooses the path.</h3>
+            <p class="lp-story-desc">After validation and key resolution, a matching auto-mode entry returns stored output. A miss executes, may post-process the output, and then stores it under the resolved key.</p>
           </div>
-          <div class="chapter-visual">
+          <div class="lp-story-visual">
             <div class="diagram-surface">
               <svg viewBox="0 0 559 240" class="diagram-svg desktop-only" role="img" aria-label="Cache branch">
                 <path data-visual-object="val" d="M 80,120 m -10,0 a 10,10 0 1,0 20,0 a 10,10 0 1,0 -20,0" fill="none" stroke="var(--ink)" stroke-width="2" />
@@ -679,13 +453,13 @@ const contentHtml = /*html*/ `
           </div>
         </article>
 
-        <article class="chapter-row chapter-04 reveal-on-scroll" aria-label="Chapter 04 Observable outcome">
-          <div class="chapter-text">
-            <span class="chapter-num">04 / Observable outcome</span>
-            <h3 class="chapter-title">A lifecycle failure becomes output, not a hidden stop.</h3>
-            <p class="chapter-desc">Validation, execution, or post-processing errors become node-scoped { _error } output and a structured execution-log record. The traversal loop continues; later nodes still depend on their resolved inputs.</p>
+        <article class="lp-story-row chapter-row chapter-04 reveal-on-scroll" aria-label="Chapter 04 Observable outcome">
+          <div class="lp-story-text">
+            <span class="lp-story-num">04 / Observable outcome</span>
+            <h3 class="lp-story-title">A lifecycle failure becomes output, not a hidden stop.</h3>
+            <p class="lp-story-desc">Validation, execution, or post-processing errors become node-scoped { _error } output and a structured execution-log record. The traversal loop continues; later nodes still depend on their resolved inputs.</p>
           </div>
-          <div class="chapter-visual">
+          <div class="lp-story-visual">
             <div class="diagram-surface">
               <svg viewBox="0 0 559 240" class="diagram-svg desktop-only" role="img" aria-label="Observable outcome">
                 <path data-visual-object="track" d="M 80,120 C 180,90 380,150 480,120" fill="none" stroke="var(--line-strong)" stroke-width="2" />
@@ -725,8 +499,8 @@ const contentHtml = /*html*/ `
       <section class="closing-cta">
         <h2 class="cta-title">Ready to run a graph?</h2>
         <div class="cta-actions">
-          <a class="button button--primary" href="${resolvePath('/docs/')}">Start with the guide</a>
-          <a class="button" href="${resolvePath('/demo/')}">Run the demo</a>
+          <a class="lp-cta lp-cta-primary" href="${resolvePath('/docs/')}">Start with the guide</a>
+          <a class="lp-cta lp-cta-secondary" href="${resolvePath('/demo/')}">Run the demo</a>
         </div>
         <p class="cta-quiet">
           <a href="https://github.com/RND-PRO/symbiote-engine">View source on GitHub</a>

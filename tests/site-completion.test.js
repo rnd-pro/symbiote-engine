@@ -232,9 +232,9 @@ test('site-completion: node preview upgrades graph-node from the narrow canvas i
   }
 });
 
-test('site-completion: a chapter animation is consumed after its first intersection', async () => {
+test('site-completion: a chapter reveal is applied once on its first intersection', async () => {
   const originalDescriptors = new Map(
-    ['document', 'matchMedia', 'IntersectionObserver', 'setTimeout', 'clearTimeout']
+    ['document', 'matchMedia', 'IntersectionObserver']
       .map((name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)]),
   );
   const classes = new Set();
@@ -242,10 +242,10 @@ test('site-completion: a chapter animation is consumed after its first intersect
     classList: {
       add: (...names) => names.forEach((name) => classes.add(name)),
       remove: (...names) => names.forEach((name) => classes.delete(name)),
+      contains: (name) => classes.has(name),
     },
   };
   let intersectionCallback;
-  let settleCallback;
   const unobserved = [];
 
   globalThis.document = {
@@ -259,28 +259,18 @@ test('site-completion: a chapter animation is consumed after its first intersect
     unobserve(element) { unobserved.push(element); }
     disconnect() {}
   };
-  globalThis.setTimeout = (callback, delay) => {
-    assert.equal(delay, 4000);
-    settleCallback = callback;
-    return 1;
-  };
-  globalThis.clearTimeout = () => {};
 
   try {
     const moduleUrl = pathToFileURL(path.join(process.cwd(), 'site/animation/index.js'));
     await import(`${moduleUrl.href}?test=${Date.now()}`);
     intersectionCallback([{ isIntersecting: true, target: chapter }]);
-    assert.ok(classes.has('is-revealed'));
-    assert.ok(classes.has('is-playing'));
-    assert.deepEqual(unobserved, [chapter]);
+    assert.ok(classes.has('is-revealed'), 'first intersection reveals the chapter');
+    assert.deepEqual(unobserved, [chapter], 'a revealed chapter is unobserved');
 
     intersectionCallback([{ isIntersecting: false, target: chapter }]);
     intersectionCallback([{ isIntersecting: true, target: chapter }]);
-    assert.deepEqual(unobserved, [chapter]);
-
-    settleCallback();
-    assert.ok(classes.has('is-played'));
-    assert.ok(!classes.has('is-playing'));
+    assert.deepEqual(unobserved, [chapter], 'repeat intersections do not re-consume the chapter');
+    assert.ok(classes.has('is-enhanced'), 'motion enhancement is flagged on the document root');
   } finally {
     for (const [name, descriptor] of originalDescriptors) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor);
@@ -317,8 +307,6 @@ test('site-completion: animation delays and durations', async (t) => {
   }
 
   for (const anim of animations) {
-    assert.ok(!anim.includes('infinite'), `Animation should not be infinite: ${anim}`);
-
     const parts = anim.split(/\s+/);
     const times = parts.filter(p => /^(-?\d*\.?\d+)(s|ms)$/i.test(p));
 
@@ -326,6 +314,14 @@ test('site-completion: animation delays and durations', async (t) => {
     let delay = 0;
     if (times.length > 0) duration = parseTime(times[0]);
     if (times.length > 1) delay = parseTime(times[1]);
+
+    if (anim.includes('infinite')) {
+      // Continuous loops are the shared reference motion language and must
+      // come from the package-owned lp-* keyframes with a bounded cycle.
+      assert.ok(/(^|\s)lp-[a-z-]+/.test(anim), `Infinite animation must use a shared lp-* keyframe: ${anim}`);
+      assert.ok(duration > 0 && duration <= 6, `Infinite loop cycle should be within 6s. Found ${duration}s in: ${anim}`);
+      continue;
+    }
 
     const positiveDelay = Math.max(0, delay);
     assert.ok(
@@ -381,19 +377,32 @@ test('site-completion: animation delays and durations', async (t) => {
     return foundDelay;
   }
 
-  // Check Chapter 02 distinct ordered delays
-  const delay02Right = extractDelay('data-motion-accent="?slide-right"?');
-  const delay02Left = extractDelay('data-motion-accent="?slide-left"?');
+  void extractDelay;
 
-  assert.ok(delay02Right !== null, "Chapter 02 slide-right should have a delay definition");
-  assert.ok(delay02Left !== null, "Chapter 02 slide-left should have a delay definition");
+  // Entrance accents settle through delayed transitions, not keyframe loops.
+  assert.match(
+    content,
+    /data-motion-accent="?slide-right"?\][^{}]*\{[^}]*transition:\s*transform[^}]*\}/,
+    'Slide accents settle through a transform transition',
+  );
 
+  // The cache-branch scene de-emphasizes the reuse route while both routes
+  // share the continuous reference dash loop.
+  assert.match(
+    content,
+    /data-route="?reuse"?\]\s*\{[^}]*opacity:\s*0?\.\d+/,
+    'Reuse route is visually de-emphasized',
+  );
+  assert.match(
+    content,
+    /data-route="?execute"?\][^{}]*\{(?=[^}]*lp-dash-flow)(?=[^}]*infinite)/,
+    'Route dashes flow continuously through the shared lp-dash-flow loop',
+  );
 
-  // Check Chapter 03 distinct ordered delays
-  const delay03Reuse = extractDelay('data-route="?reuse"?');
-  const delay03Execute = extractDelay('data-route="?execute"?');
-
-  assert.ok(delay03Reuse !== null, "Chapter 03 reuse should have a delay definition");
-  assert.ok(delay03Execute !== null, "Chapter 03 execute should have a delay definition");
-  assert.notStrictEqual(delay03Reuse, delay03Execute, "Chapter 03 reuse/execute should have distinct ordered delays");
+  // Reduced motion restores full static visibility.
+  assert.match(
+    content,
+    /prefers-reduced-motion:\s*reduce[\s\S]*data-route="?execute"?\][\s\S]*?opacity:\s*1/,
+    'Reduced motion restores static route visibility',
+  );
 });
