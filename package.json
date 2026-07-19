@@ -79,7 +79,7 @@
   "devDependencies": {
     "@symbiotejs/symbiote": "3.8.0-webmcp.2",
     "jsda-kit": "1.6.0",
-    "library-pages": "0.1.0-alpha.9",
+    "library-pages": "0.1.0-alpha.10",
     "linkedom": "0.18.13",
     "symbiote-ui": "0.3.0-alpha.67"
   }

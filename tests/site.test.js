@@ -61,9 +61,9 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
 
   // 4. Inventories must be identical
   assert.strictEqual(filesBefore.length, 80, 'pre-build npm inventory count is exactly 80');
-  assert.strictEqual(sizeBefore, 565638, 'pre-build npm unpacked size is exactly 565638');
+  assert.strictEqual(sizeBefore, 565639, 'pre-build npm unpacked size is exactly 565639');
   assert.strictEqual(filesAfter.length, 80, 'post-build npm inventory count is exactly 80');
-  assert.strictEqual(sizeAfter, 565638, 'post-build npm unpacked size is exactly 565638');
+  assert.strictEqual(sizeAfter, 565639, 'post-build npm unpacked size is exactly 565639');
   assert.deepStrictEqual(filesBefore.sort(), filesAfter.sort(), 'Pack inventory exactly matches before and after site build');
 
   // 5. Verify exclusion policies
