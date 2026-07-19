@@ -118,7 +118,7 @@ test('site-completion: header search is a local keyboard-accessible dialog', () 
   execSync('node --check _site/client/index.js');
 });
 
-test('site-completion: node preview disables Material Symbols autoload before rendering labeled nodes', async () => {
+test('site-completion: node preview loads Material Symbols from the local icons stylesheet', async () => {
   // DOM harness is justified: stylesheet autoload and element upgrade exist only in a DOM document/registry.
   const source = fs.readFileSync('site/docs/node-preview/index.js', 'utf8');
   assert.match(
@@ -127,11 +127,16 @@ test('site-completion: node preview disables Material Symbols autoload before re
     'Preview imports configureMaterialSymbols only from the narrow node-canvas entrypoint',
   );
   assert.doesNotMatch(source, /from 'symbiote-ui\/ui'/, 'Preview never imports the broad symbiote-ui/ui aggregate');
-  const configureIndex = source.indexOf('configureMaterialSymbols({ autoload: false })');
-  assert.ok(configureIndex > -1, 'Preview disables Material Symbols autoload');
+  const configureIndex = source.indexOf('configureMaterialSymbols({');
+  assert.ok(configureIndex > -1, 'Preview configures Material Symbols loading');
+  assert.match(
+    source,
+    /hrefBuilder: \(\) => '\.\.\/\.\.\/icons\/material-symbols\.css'/,
+    'Preview points Material Symbols at the locally copied icons stylesheet',
+  );
   assert.ok(
     configureIndex < source.indexOf("document.createElement('node-canvas')"),
-    'Autoload is disabled before the preview creates canvas elements',
+    'Icon loading is configured before the preview creates canvas elements',
   );
 
   let dom = null;
@@ -156,10 +161,12 @@ test('site-completion: node preview disables Material Symbols autoload before re
     }
     assert.ok(ready, 'Node preview reached its ready lifecycle state');
 
+    const managedLink = document.querySelector('link[data-sn-material-symbols="managed"]');
+    assert.ok(managedLink, 'Preview appends the managed Material Symbols stylesheet');
     assert.equal(
-      document.querySelector('link[data-sn-material-symbols="managed"]'),
-      null,
-      'Preview appends no managed Material Symbols stylesheet',
+      managedLink.getAttribute('href'),
+      '../../icons/material-symbols.css',
+      'Managed stylesheet resolves to the locally copied icons asset, never an external font host',
     );
 
     const GraphNodeComponent = customElements.get('graph-node');
@@ -178,7 +185,7 @@ test('site-completion: node preview disables Material Symbols autoload before re
   } finally {
     if (dom) {
       const { configureMaterialSymbols } = await import('symbiote-ui/canvas/node-canvas');
-      configureMaterialSymbols({ autoload: true });
+      configureMaterialSymbols({ autoload: true, hrefBuilder: null });
       document.querySelectorAll('link[data-sn-material-symbols="managed"]').forEach((link) => link.remove());
       document.body.innerHTML = '';
       dom.restore();

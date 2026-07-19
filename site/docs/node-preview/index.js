@@ -3,8 +3,10 @@ import { configureMaterialSymbols } from 'symbiote-ui/canvas/node-canvas';
 import { enhanceLibraryPages } from 'library-pages/client';
 import { enhanceDocsCodeBlocks } from '../enhance.js';
 
-// The preview suppresses Material Symbols visually, so the font request is disabled before any node renders.
-configureMaterialSymbols({ autoload: false });
+// Icons resolve against the locally copied stylesheet so no external font host is contacted.
+configureMaterialSymbols({
+  hrefBuilder: () => '../../icons/material-symbols.css',
+});
 
 enhanceLibraryPages();
 enhanceDocsCodeBlocks();
@@ -29,7 +31,21 @@ if (stage) {
         positions: { source: [48, 74], double: { x: 300, y: 74 } },
       });
       await new Promise((resolve) => requestAnimationFrame(resolve));
-      canvas.flyToNodes(['source', 'double'], { padding: 28, minZoom: 0.9, maxZoom: 1.15, select: false });
+
+      let refitQueued = false;
+      let refit = () => {
+        if (refitQueued) return;
+        refitQueued = true;
+        requestAnimationFrame(() => {
+          refitQueued = false;
+          canvas.flyToNodes(['source', 'double'], { padding: 24, minZoom: 0.35, maxZoom: 1, select: false });
+        });
+      };
+      refit();
+      if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(refit).observe(stage);
+      }
+
       previewRoot?.classList.add('is-ready');
       fallback?.setAttribute('hidden', '');
     } catch {

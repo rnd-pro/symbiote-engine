@@ -223,10 +223,6 @@ th {
   --sn-accent-color: var(--brand);
   --sn-conn-color: var(--brand);
 }
-.node-preview-stage .material-symbols-outlined {
-  font-size: 0;
-  line-height: 0;
-}
 .node-preview-fallback {
   display: grid;
   min-height: 270px;

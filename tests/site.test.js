@@ -90,6 +90,8 @@ test('Built site and exact artifacts/hashes', { concurrency: false }, async () =
     'docs/rendering/index.html',
     'docs/reference/index.html',
     'docs/safety/index.html',
+    'icons/material-symbols.css',
+    'icons/material-symbols-outlined-400.ttf',
     'index.html',
     'llms.txt',
     'manifest.json',
