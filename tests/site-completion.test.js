@@ -91,7 +91,7 @@ function installCanvasDom() {
 test('site-completion: docs use route-scoped Symbiote UI bundles', () => {
   const gettingStarted = fs.readFileSync('_site/docs/getting-started/index.html', 'utf8');
   const guide = fs.readFileSync('_site/docs/guide/index.html', 'utf8');
-  const enhanceSource = fs.readFileSync('site/docs/enhance.js', 'utf8');
+  const enhanceSource = fs.readFileSync('node_modules/library-pages/client/code-blocks.js', 'utf8');
 
   assert.match(gettingStarted, /<script[^>]+src=["']?[^ >]*\/docs\/node-preview\/index\.js/);
   assert.doesNotMatch(gettingStarted, /<script[^>]+src=["']?[^ >]*\/docs\/index\.js/);

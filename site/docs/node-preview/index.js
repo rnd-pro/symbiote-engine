@@ -1,7 +1,6 @@
 import 'symbiote-ui/display/code-block';
 import { configureMaterialSymbols } from 'symbiote-ui/canvas/node-canvas';
-import { enhanceLibraryPages } from 'library-pages/client';
-import { enhanceDocsCodeBlocks } from '../enhance.js';
+import { enhanceLibraryPages, enhanceDocsCodeBlocks } from 'library-pages/client';
 
 // Icons resolve against the locally copied stylesheet so no external font host is contacted.
 configureMaterialSymbols({
