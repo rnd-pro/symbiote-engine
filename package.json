@@ -12,6 +12,7 @@
     "./contracts": "./contracts/index.js",
     "./contracts/*": "./contracts/*",
     "./artifacts": "./artifacts.js",
+    "./resource-lease-queue": "./resource-lease-queue.js",
     "./FocusController.js": "./FocusController.js",
     "./Graph.js": "./Graph.js",
     "./GraphServer.js": "./GraphServer.js",

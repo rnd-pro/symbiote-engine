@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added domain-neutral `resource-lease-queue` module with tenant fairness,
+  bounded burst, batch aging, AbortSignal support, and heartbeat recovery.
 - Bound browser worker shutdown, including aborts during launch, and expose
   `capture.browserCloseTimeouts` so a disconnected browser-adapter close promise
   cannot block completed render frames.
