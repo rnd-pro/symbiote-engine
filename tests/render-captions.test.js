@@ -1257,6 +1257,24 @@ test('caption grouping preserves adjacent source cue identities through VTT outp
   assert.match(built.vtt, /\nclip-b\n/);
 });
 
+test('caption grouping derives stable child identities when one source cue wraps', () => {
+  let built = buildCaptionCues({
+    clipTranscripts: [{
+      cueId: 'turn-guide',
+      cueIndex: 0,
+      speaker: 'guide',
+      authoredText: 'one two three four five six',
+      words: ['one', 'two', 'three', 'four', 'five', 'six'].map((text, index) => ({
+        text,
+        startSec: index * 0.2,
+        endSec: index * 0.2 + 0.15,
+      })),
+    }],
+  });
+
+  assert.deepEqual(built.cues.map((cue) => cue.cueId), ['turn-guide', 'turn-guide:part-2']);
+});
+
 test('caption placement rejects non-canonical continuity controls before producing a track', () => {
   let cues = [{ cueId: 'cue-1', startSec: 0, endSec: 1, text: 'Caption' }];
 

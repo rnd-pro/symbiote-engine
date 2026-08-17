@@ -2118,19 +2118,24 @@ export function captionCuesFromTimedWords(timedWords = [], options = {}) {
   });
   words.sort((a, b) => a.startSec - b.startSec || a.endSec - b.endSec || a.speaker.localeCompare(b.speaker));
   let captionCues = [];
+  let cuePartCounts = new Map();
   let current = null;
+  let currentSourceCueId = '';
   for (let word of words) {
     let gapSec = current ? word.startSec - current.endSec : 0;
     let shouldBreak = !current
       || current.speaker !== word.speaker
       || current.cueIndex !== word.cueIndex
-      || current.cueId !== word.cueId
+      || currentSourceCueId !== word.cueId
       || current.attributionSource !== word.timingSource
       || current.words.length >= maxWords
       || captionRenderedCharacterCount([...current.words, word.text], current.speaker) > maxCharacters
       || gapSec > CAPTION_LONG_PAUSE_SEC
       || /[.!?]$/.test(current.words[current.words.length - 1] || '');
     if (shouldBreak) {
+      let partCount = (cuePartCounts.get(word.cueId) || 0) + 1;
+      cuePartCounts.set(word.cueId, partCount);
+      currentSourceCueId = word.cueId;
       current = {
         startSec: word.startSec,
         endSec: word.endSec,
@@ -2139,7 +2144,7 @@ export function captionCuesFromTimedWords(timedWords = [], options = {}) {
         speaker: word.speaker,
         attributionSource: word.timingSource,
         cueIndex: word.cueIndex,
-        cueId: word.cueId,
+        cueId: partCount === 1 ? word.cueId : `${word.cueId}:part-${partCount}`,
         unmappedWordCount: 0,
       };
       captionCues.push(current);
