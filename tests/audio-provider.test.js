@@ -339,6 +339,30 @@ test('file artifact store rejects a different synthesis receipt for the same con
   }
 });
 
+test('file artifact store indexes distinct request receipts for identical content bytes', async () => {
+  let root = await mkdtemp(join(os.tmpdir(), 'sym-engine-audio-receipt-index-'));
+  try {
+    let store = createFileArtifactStore({ root });
+    let bytes = Buffer.from('RIFFsamewav');
+    let firstItem = {
+      id: 'first', text: 'Hello', language: 'en', voiceRef: 'voice:a', style: 'natural', format: 'wav', normalize: true,
+    };
+    let secondItem = { ...firstItem, id: 'second', style: 'measured natural pace' };
+    let firstReceipt = testReceipt(firstItem, bytes);
+    let secondReceipt = testReceipt(secondItem, bytes);
+
+    let first = await store.put(bytes, { mimeType: 'audio/wav', synthesisReceipt: firstReceipt });
+    let second = await store.put(bytes, { mimeType: 'audio/wav', synthesisReceipt: secondReceipt });
+
+    assert.equal(first.artifactId, second.artifactId);
+    assert.deepEqual(second.metadata.synthesisReceipt, firstReceipt);
+    assert.deepEqual(second.metadata.synthesisReceipts[firstReceipt.requestHash], firstReceipt);
+    assert.deepEqual(second.metadata.synthesisReceipts[secondReceipt.requestHash], secondReceipt);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test('provider job queue serializes per model class, idempotently caches, and cancels queued jobs', async () => {
   let active = 0;
   let maxActive = 0;
