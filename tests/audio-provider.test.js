@@ -34,24 +34,7 @@ function testReceipt(item, bytes = Buffer.from('RIFFfakewav'), overrides = {}) {
     requestHash: createAudioSynthesisRequestHash(item),
     requestedVoiceRef: item.voiceRef,
     resolvedVoiceRef: 'qwen3:speaker:vivian',
-    speakerAttestation: 'c'.repeat(64),
-    speakerProbe: {
-      probeFamily: 'speaker-embedding-v1',
-      probeVersionToken: 'a'.repeat(64),
-      enrollmentRevision: 'b'.repeat(64),
-      segmentationRevision: 'segments-v1',
-      segmentCount: 3,
-      enrolledVoiceMatch: true,
-      segmentsConsistent: true,
-      maxEnrolledDistance: 0.2,
-      minOtherVoiceMargin: 0.4,
-      maxSegmentDistance: 0.15,
-      thresholds: {
-        enrolledDistanceMax: 0.3,
-        otherVoiceMarginMin: 0.25,
-        segmentDistanceMax: 0.2,
-      },
-    },
+    voiceBindingAttestation: 'c'.repeat(64),
     normalization: {
       version: 'loudnorm-v1',
       applied: true,
@@ -277,7 +260,7 @@ test('audio cache keys include receipt version, provider, settings, model, voice
       providerId: 'local-qwen3',
       input: { text: 'Hola', language: 'es', voiceRef: 'voice:mateo-es-v1' },
     }),
-    /audioCache\.synthesisReceiptVersion.*symbiote-audio-synthesis-receipt-v2/,
+    /audioCache\.synthesisReceiptVersion.*symbiote-audio-synthesis-receipt-v3/,
   );
   assert.equal(
     createAudioCacheKey({ kind: 'transcribe', synthesisReceiptVersion: 'ignored-v1', input: { audioRef: ARTIFACT_A } }),
@@ -334,6 +317,30 @@ test('file artifact store rejects a different synthesis receipt for the same con
       (error) => error.code === 'AUDIO_ARTIFACT_RECEIPT_CONFLICT',
     );
     assert.deepEqual((await store.get(`sha256:${createAudioArtifactHash(Buffer.from('RIFFfakewav'))}`)).metadata.synthesisReceipt, receipt);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('file artifact store indexes distinct request receipts for identical content bytes', async () => {
+  let root = await mkdtemp(join(os.tmpdir(), 'sym-engine-audio-receipt-index-'));
+  try {
+    let store = createFileArtifactStore({ root });
+    let bytes = Buffer.from('RIFFsamewav');
+    let firstItem = {
+      id: 'first', text: 'Hello', language: 'en', voiceRef: 'voice:a', style: 'natural', format: 'wav', normalize: true,
+    };
+    let secondItem = { ...firstItem, id: 'second', style: 'measured natural pace' };
+    let firstReceipt = testReceipt(firstItem, bytes);
+    let secondReceipt = testReceipt(secondItem, bytes);
+
+    let first = await store.put(bytes, { mimeType: 'audio/wav', synthesisReceipt: firstReceipt });
+    let second = await store.put(bytes, { mimeType: 'audio/wav', synthesisReceipt: secondReceipt });
+
+    assert.equal(first.artifactId, second.artifactId);
+    assert.deepEqual(second.metadata.synthesisReceipt, firstReceipt);
+    assert.deepEqual(second.metadata.synthesisReceipts[firstReceipt.requestHash], firstReceipt);
+    assert.deepEqual(second.metadata.synthesisReceipts[secondReceipt.requestHash], secondReceipt);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

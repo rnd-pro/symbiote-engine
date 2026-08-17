@@ -39,24 +39,7 @@ function signedReceipt(item, bytes = WAV_BYTES, overrides = {}) {
     requestHash: createAudioSynthesisRequestHash(item),
     requestedVoiceRef: item.voiceRef,
     resolvedVoiceRef: 'qwen3:speaker:vivian',
-    speakerAttestation: 'c'.repeat(64),
-    speakerProbe: {
-      probeFamily: 'speaker-embedding-v1',
-      probeVersionToken: 'a'.repeat(64),
-      enrollmentRevision: 'b'.repeat(64),
-      segmentationRevision: 'segments-v1',
-      segmentCount: 3,
-      enrolledVoiceMatch: true,
-      segmentsConsistent: true,
-      maxEnrolledDistance: 0.2,
-      minOtherVoiceMargin: 0.4,
-      maxSegmentDistance: 0.15,
-      thresholds: {
-        enrolledDistanceMax: 0.3,
-        otherVoiceMarginMin: 0.25,
-        segmentDistanceMax: 0.2,
-      },
-    },
+    voiceBindingAttestation: 'c'.repeat(64),
     normalization: {
       version: 'loudnorm-v1',
       applied: true,
@@ -305,42 +288,11 @@ test('local audio TTS rejects invalid receipt HMAC and response consistency mism
   }
 });
 
-test('local audio TTS rejects tampered, negative, and threshold-failing v2 evidence', async () => {
+test('local audio TTS rejects tampered v3 voice binding and normalization evidence', async () => {
   let tampered = signedReceipt(synthesisItem());
-  tampered.speakerProbe.maxEnrolledDistance = 0.21;
-  let probe = signedReceipt(synthesisItem()).speakerProbe;
+  tampered.voiceBindingAttestation = 'e'.repeat(64);
   let fixtures = [
     { code: 'AUDIO_SYNTHESIS_RECEIPT_HMAC_INVALID', receipt: tampered },
-    {
-      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
-      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
-        speakerProbe: { ...probe, enrolledVoiceMatch: false },
-      }),
-    },
-    {
-      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
-      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
-        speakerProbe: { ...probe, segmentsConsistent: false },
-      }),
-    },
-    {
-      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
-      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
-        speakerProbe: { ...probe, maxEnrolledDistance: 0.31 },
-      }),
-    },
-    {
-      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
-      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
-        speakerProbe: { ...probe, minOtherVoiceMargin: 0.24 },
-      }),
-    },
-    {
-      code: 'AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED',
-      receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
-        speakerProbe: { ...probe, maxSegmentDistance: 0.21 },
-      }),
-    },
     {
       code: 'AUDIO_SYNTHESIS_RECEIPT_NORMALIZATION_FAILED',
       receipt: signedReceipt(synthesisItem(), WAV_BYTES, {
@@ -370,16 +322,14 @@ test('local audio TTS rejects tampered, negative, and threshold-failing v2 evide
   }
 });
 
-test('local audio TTS rejects out-of-range, private-field, and stale v1 receipts', async () => {
-  let outOfRangeProbe = signedReceipt(synthesisItem());
-  outOfRangeProbe.speakerProbe.maxSegmentDistance = 2.01;
+test('local audio TTS rejects private biometric fields, invalid normalization, and stale receipts', async () => {
   let outOfRangeNormalization = signedReceipt(synthesisItem());
   outOfRangeNormalization.normalization.targetLufs = -40;
   let privateField = signedReceipt(synthesisItem());
-  privateField.speakerProbe.embedding = [0.1, 0.2];
-  let staleV1 = signedReceipt(synthesisItem());
-  staleV1.receiptVersion = 'symbiote-audio-synthesis-receipt-v1';
-  let fixtures = [outOfRangeProbe, outOfRangeNormalization, privateField, staleV1];
+  privateField.speakerProbe = { enrolledVoiceMatch: true };
+  let staleV2 = signedReceipt(synthesisItem());
+  staleV2.receiptVersion = 'symbiote-audio-synthesis-receipt-v2';
+  let fixtures = [outOfRangeNormalization, privateField, staleV2];
   for (let receipt of fixtures) {
     let provider = createLocalAudioTtsProvider({
       endpoint: 'http://local-audio.test',

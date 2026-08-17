@@ -54,6 +54,22 @@ function receiptConflictError() {
   return error;
 }
 
+function mergeSynthesisReceipts(existing = {}, incoming) {
+  let receipts = cloneJson(existing.synthesisReceipts || {});
+  let candidates = [existing.synthesisReceipt, incoming].filter(Boolean);
+  for (let receipt of candidates) {
+    let requestHash = cleanString(receipt.requestHash, '');
+    if (!/^[a-f0-9]{64}$/.test(requestHash)) {
+      throw new Error('synthesis receipt requestHash is required for content-addressed metadata');
+    }
+    if (receipts[requestHash] && !sameJson(receipts[requestHash], receipt)) {
+      throw receiptConflictError();
+    }
+    receipts[requestHash] = cloneJson(receipt);
+  }
+  return receipts;
+}
+
 async function readJsonIfExists(path) {
   try {
     return JSON.parse(await readFile(path, 'utf8'));
@@ -99,23 +115,22 @@ export function createFileArtifactStore(options = {}) {
 
       await mkdir(root, { recursive: true });
       let existing = await readJsonIfExists(metadataPath);
-      if (existing?.synthesisReceipt && metadata.synthesisReceipt
-        && !sameJson(existing.synthesisReceipt, metadata.synthesisReceipt)) {
-        throw receiptConflictError();
-      }
+      let synthesisReceipts = mergeSynthesisReceipts(existing || {}, metadata.synthesisReceipt);
       let sidecar = existing ? {
         ...existing,
         ...(!existing.synthesisReceipt && metadata.synthesisReceipt
           ? { synthesisReceipt: cloneJson(metadata.synthesisReceipt) }
           : {}),
+        ...(Object.keys(synthesisReceipts).length ? { synthesisReceipts } : {}),
       } : {
         ...cloneJson(metadata),
+        ...(Object.keys(synthesisReceipts).length ? { synthesisReceipts } : {}),
         artifactId,
         mimeType,
         bytes: bytes.length,
       };
       await writeFile(path, bytes);
-      if (!existing || sidecar.synthesisReceipt !== existing.synthesisReceipt) {
+      if (!existing || !sameJson(sidecar, existing)) {
         await writeFile(metadataPath, `${JSON.stringify(sidecar, null, 2)}\n`);
       }
 

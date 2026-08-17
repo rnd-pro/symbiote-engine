@@ -11,7 +11,7 @@ const SHA256_ARTIFACT_RE = /^sha256:[a-f0-9]{64}$/;
 const SHA256_DIGEST_RE = /^[a-f0-9]{64}$/;
 const SAFE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 
-export const AUDIO_SYNTHESIS_RECEIPT_VERSION = 'symbiote-audio-synthesis-receipt-v2';
+export const AUDIO_SYNTHESIS_RECEIPT_VERSION = 'symbiote-audio-synthesis-receipt-v3';
 export const AUDIO_SYNTHESIS_RECEIPT_HEADER = 'X-Audio-Receipt';
 
 function fail(path, message) {
@@ -167,8 +167,7 @@ export function normalizeAudioSynthesisReceipt(receipt = {}) {
     'requestHash',
     'requestedVoiceRef',
     'resolvedVoiceRef',
-    'speakerAttestation',
-    'speakerProbe',
+    'voiceBindingAttestation',
     'normalization',
     'model',
     'language',
@@ -182,26 +181,6 @@ export function normalizeAudioSynthesisReceipt(receipt = {}) {
   }
   let model = requireObject(receipt.model, 'synthesisReceipt.model');
   requireExactKeys(model, ['family', 'versionToken'], 'synthesisReceipt.model');
-  let speakerProbe = requireObject(receipt.speakerProbe, 'synthesisReceipt.speakerProbe');
-  requireExactKeys(speakerProbe, [
-    'probeFamily',
-    'probeVersionToken',
-    'enrollmentRevision',
-    'segmentationRevision',
-    'segmentCount',
-    'enrolledVoiceMatch',
-    'segmentsConsistent',
-    'maxEnrolledDistance',
-    'minOtherVoiceMargin',
-    'maxSegmentDistance',
-    'thresholds',
-  ], 'synthesisReceipt.speakerProbe');
-  let thresholds = requireObject(speakerProbe.thresholds, 'synthesisReceipt.speakerProbe.thresholds');
-  requireExactKeys(thresholds, [
-    'enrolledDistanceMax',
-    'otherVoiceMarginMin',
-    'segmentDistanceMax',
-  ], 'synthesisReceipt.speakerProbe.thresholds');
   let normalization = requireObject(receipt.normalization, 'synthesisReceipt.normalization');
   requireExactKeys(normalization, [
     'version',
@@ -209,30 +188,13 @@ export function normalizeAudioSynthesisReceipt(receipt = {}) {
     'targetLufs',
     'truePeakLimitDbfs',
   ], 'synthesisReceipt.normalization');
-  let speakerAttestation = requireDigest(receipt.speakerAttestation, 'synthesisReceipt.speakerAttestation');
+  let voiceBindingAttestation = requireDigest(receipt.voiceBindingAttestation, 'synthesisReceipt.voiceBindingAttestation');
   return {
     receiptVersion: AUDIO_SYNTHESIS_RECEIPT_VERSION,
     requestHash: requireDigest(receipt.requestHash, 'synthesisReceipt.requestHash'),
     requestedVoiceRef: assertPortableId(receipt.requestedVoiceRef, 'synthesisReceipt.requestedVoiceRef'),
     resolvedVoiceRef: assertPortableId(receipt.resolvedVoiceRef, 'synthesisReceipt.resolvedVoiceRef'),
-    speakerAttestation,
-    speakerProbe: {
-      probeFamily: requireSafeToken(speakerProbe.probeFamily, 'synthesisReceipt.speakerProbe.probeFamily'),
-      probeVersionToken: requireDigest(speakerProbe.probeVersionToken, 'synthesisReceipt.speakerProbe.probeVersionToken'),
-      enrollmentRevision: requireDigest(speakerProbe.enrollmentRevision, 'synthesisReceipt.speakerProbe.enrollmentRevision'),
-      segmentationRevision: requireSafeToken(speakerProbe.segmentationRevision, 'synthesisReceipt.speakerProbe.segmentationRevision'),
-      segmentCount: strictPositiveInteger(speakerProbe.segmentCount, 'synthesisReceipt.speakerProbe.segmentCount'),
-      enrolledVoiceMatch: requireBoolean(speakerProbe.enrolledVoiceMatch, 'synthesisReceipt.speakerProbe.enrolledVoiceMatch'),
-      segmentsConsistent: requireBoolean(speakerProbe.segmentsConsistent, 'synthesisReceipt.speakerProbe.segmentsConsistent'),
-      maxEnrolledDistance: requireFiniteNumberInRange(speakerProbe.maxEnrolledDistance, 0, 2, 'synthesisReceipt.speakerProbe.maxEnrolledDistance'),
-      minOtherVoiceMargin: requireFiniteNumberInRange(speakerProbe.minOtherVoiceMargin, -2, 2, 'synthesisReceipt.speakerProbe.minOtherVoiceMargin'),
-      maxSegmentDistance: requireFiniteNumberInRange(speakerProbe.maxSegmentDistance, 0, 2, 'synthesisReceipt.speakerProbe.maxSegmentDistance'),
-      thresholds: {
-        enrolledDistanceMax: requireFiniteNumberInRange(thresholds.enrolledDistanceMax, 0, 2, 'synthesisReceipt.speakerProbe.thresholds.enrolledDistanceMax'),
-        otherVoiceMarginMin: requireFiniteNumberInRange(thresholds.otherVoiceMarginMin, -2, 2, 'synthesisReceipt.speakerProbe.thresholds.otherVoiceMarginMin'),
-        segmentDistanceMax: requireFiniteNumberInRange(thresholds.segmentDistanceMax, 0, 2, 'synthesisReceipt.speakerProbe.thresholds.segmentDistanceMax'),
-      },
-    },
+    voiceBindingAttestation,
     normalization: {
       version: requireSafeToken(normalization.version, 'synthesisReceipt.normalization.version'),
       applied: requireBoolean(normalization.applied, 'synthesisReceipt.normalization.applied'),
