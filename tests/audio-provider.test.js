@@ -34,24 +34,7 @@ function testReceipt(item, bytes = Buffer.from('RIFFfakewav'), overrides = {}) {
     requestHash: createAudioSynthesisRequestHash(item),
     requestedVoiceRef: item.voiceRef,
     resolvedVoiceRef: 'qwen3:speaker:vivian',
-    speakerAttestation: 'c'.repeat(64),
-    speakerProbe: {
-      probeFamily: 'speaker-embedding-v1',
-      probeVersionToken: 'a'.repeat(64),
-      enrollmentRevision: 'b'.repeat(64),
-      segmentationRevision: 'segments-v1',
-      segmentCount: 3,
-      enrolledVoiceMatch: true,
-      segmentsConsistent: true,
-      maxEnrolledDistance: 0.2,
-      minOtherVoiceMargin: 0.4,
-      maxSegmentDistance: 0.15,
-      thresholds: {
-        enrolledDistanceMax: 0.3,
-        otherVoiceMarginMin: 0.25,
-        segmentDistanceMax: 0.2,
-      },
-    },
+    voiceBindingAttestation: 'c'.repeat(64),
     normalization: {
       version: 'loudnorm-v1',
       applied: true,
@@ -277,7 +260,7 @@ test('audio cache keys include receipt version, provider, settings, model, voice
       providerId: 'local-qwen3',
       input: { text: 'Hola', language: 'es', voiceRef: 'voice:mateo-es-v1' },
     }),
-    /audioCache\.synthesisReceiptVersion.*symbiote-audio-synthesis-receipt-v2/,
+    /audioCache\.synthesisReceiptVersion.*symbiote-audio-synthesis-receipt-v3/,
   );
   assert.equal(
     createAudioCacheKey({ kind: 'transcribe', synthesisReceiptVersion: 'ignored-v1', input: { audioRef: ARTIFACT_A } }),

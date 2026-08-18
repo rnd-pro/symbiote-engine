@@ -111,13 +111,6 @@ export function verifyAudioSynthesisReceipt({
   if (!sameDigest(receipt.artifactHash, expectedArtifactHash)) {
     throw receiptError('AUDIO_SYNTHESIS_RECEIPT_ARTIFACT_MISMATCH', 'audio synthesis receipt does not match the WAV bytes');
   }
-  let probe = receipt.speakerProbe;
-  if (!probe.enrolledVoiceMatch || !probe.segmentsConsistent
-    || probe.maxEnrolledDistance > probe.thresholds.enrolledDistanceMax
-    || probe.minOtherVoiceMargin < probe.thresholds.otherVoiceMarginMin
-    || probe.maxSegmentDistance > probe.thresholds.segmentDistanceMax) {
-    throw receiptError('AUDIO_SYNTHESIS_RECEIPT_SPEAKER_PROBE_FAILED', 'audio synthesis receipt speaker probe did not satisfy its signed verdicts and thresholds');
-  }
   let expectedNormalization = item.normalize !== false;
   if (receipt.normalization.applied !== expectedNormalization) {
     throw receiptError('AUDIO_SYNTHESIS_RECEIPT_NORMALIZATION_FAILED', 'audio synthesis receipt normalization does not match the public TTS item');
