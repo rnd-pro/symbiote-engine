@@ -45,6 +45,7 @@ test('root engine API imports in Node', async () => {
   assert.equal(typeof engine.buildRenderQueueSnapshot, 'function');
   assert.equal(typeof engine.createRenderCanceledError, 'function');
   assert.equal(typeof engine.createRenderTimeoutError, 'function');
+  assert.equal(typeof engine.createResourceLeaseQueue, 'function');
   assert.equal(typeof engine.buildRenderAudioLayerProof, 'function');
   assert.equal(typeof engine.buildRenderAvSyncProof, 'function');
   assert.equal(typeof engine.createStageProgressTracker, 'function');
@@ -219,6 +220,7 @@ test('browser engine API excludes Node-only runtime modules', async () => {
   assert.equal(engine.selectRenderAcceleration, undefined);
   assert.equal(engine.planSegmentConcat, undefined);
   assert.equal(engine.admitRenderRequest, undefined);
+  assert.equal(typeof engine.createResourceLeaseQueue, 'function');
 });
 
 test('video pack stays on the browser-safe registry path', async () => {

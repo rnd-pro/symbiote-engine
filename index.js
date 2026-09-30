@@ -10,6 +10,7 @@ export { Graph } from './Graph.js';
 export { Executor } from './Executor.js';
 export { GraphHistory } from './History.js';
 export { nanoid } from './nanoid.js';
+export { createResourceLeaseQueue } from './resource-lease-queue.js';
 
 
 export {
