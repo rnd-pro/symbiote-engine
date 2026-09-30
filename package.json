@@ -1,6 +1,6 @@
 {
   "name": "symbiote-engine",
-  "version": "0.3.0-alpha.14",
+  "version": "0.3.0-alpha.15",
   "description": "Run portable workflow graphs with a domain-agnostic Symbiote runtime.",
   "private": false,
   "type": "module",
